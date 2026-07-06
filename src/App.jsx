@@ -519,19 +519,28 @@ export default function App() {
   const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
   const tabs = useMemo(() => createTabs(mode), [mode]);
   const todayTasks = useMemo(() => state.tasks.filter((task) => task.date === todayString()), [state.tasks]);
-  const pastTasks = useMemo(
-    () =>
-      state.tasks
-        .filter((task) => task.date < todayString())
-        .sort((left, right) => {
-          if (left.date !== right.date) {
-            return right.date.localeCompare(left.date);
-          }
+  const editableWeekTasks = useMemo(() => {
+    const weekStart = startOfWeek();
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
 
-          return left.title.localeCompare(right.title, 'ko-KR');
-        }),
-    [state.tasks],
-  );
+    return state.tasks
+      .filter((task) => {
+        if (task.date === todayString()) {
+          return false;
+        }
+
+        const taskDate = parseDateValue(task.date);
+        return taskDate >= weekStart && taskDate < weekEnd;
+      })
+      .sort((left, right) => {
+        if (left.date !== right.date) {
+          return right.date.localeCompare(left.date);
+        }
+
+        return left.title.localeCompare(right.title, 'ko-KR');
+      });
+  }, [state.tasks]);
   const childBalances = useMemo(
     () => balances.filter((member) => member.role === MODE_CHILD),
     [balances],
@@ -1435,14 +1444,14 @@ export default function App() {
           {mode === MODE_PARENT && (
             <section className="panel">
               <div className="section-head">
-                <h2>지난 날짜 과제</h2>
-                <p>오늘 이전에 등록된 과제도 여기에서 완료 처리할 수 있습니다.</p>
+                <h2>이번 주 과제 업데이트</h2>
+                <p>이번 주 월요일부터 일요일까지의 과제 중 오늘을 제외한 항목을 여기에서 수정합니다.</p>
               </div>
               <div className="task-list">
-                {pastTasks.length === 0 ? (
-                  <div className="empty-state">업데이트할 지난 날짜 과제가 없습니다.</div>
+                {editableWeekTasks.length === 0 ? (
+                  <div className="empty-state">이번 주에 업데이트할 과제가 없습니다.</div>
                 ) : (
-                  pastTasks.map((task) => (
+                  editableWeekTasks.map((task) => (
                     <div key={task.id} className={task.completed ? 'task-row done' : 'task-row'}>
                       <label className="task-check">
                         <input type="checkbox" checked={task.completed} onChange={() => toggleTask(task.id)} />
