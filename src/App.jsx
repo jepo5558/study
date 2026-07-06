@@ -48,6 +48,15 @@ function parseDateValue(value) {
   return new Date(value);
 }
 
+function normalizeDateKey(value) {
+  const parsed = parseDateValue(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return todayString();
+  }
+
+  return toLocalDateKey(parsed);
+}
+
 function todayString() {
   return toLocalDateKey(new Date());
 }
@@ -112,7 +121,12 @@ function loadState() {
       ...defaultState,
       ...parsed,
       members: Array.isArray(parsed.members) ? parsed.members : [],
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      tasks: Array.isArray(parsed.tasks)
+        ? parsed.tasks.map((task) => ({
+            ...task,
+            date: normalizeDateKey(task?.date),
+          }))
+        : [],
       cheers: Array.isArray(parsed.cheers) && parsed.cheers.length > 0 ? parsed.cheers : defaultState.cheers,
       rewards: Array.isArray(parsed.rewards) ? parsed.rewards : [],
     };
@@ -144,7 +158,7 @@ function sanitizeImportedState(raw) {
           id: String(task.id ?? crypto.randomUUID()),
           title: String(task.title ?? '').trim(),
           memberId: String(task.memberId ?? ''),
-          date: String(task.date ?? todayString()),
+          date: normalizeDateKey(task.date ?? todayString()),
           points: Number(task.points || 0),
           category: String(task.category ?? '기타').trim() || '기타',
           fixed: Boolean(task.fixed),
@@ -1476,13 +1490,6 @@ export default function App() {
                           onClick={() => setTaskCompletion(task.id, true)}
                         >
                           완료
-                        </button>
-                        <button
-                          type="button"
-                          className={!task.completed ? 'tab-button active' : 'tab-button'}
-                          onClick={() => setTaskCompletion(task.id, false)}
-                        >
-                          미완료
                         </button>
                         <button type="button" className="ghost-button danger" onClick={() => deleteTask(task.id)}>
                           삭제
