@@ -4,7 +4,7 @@ const STORAGE_KEY = 'study_project_state_v1';
 const PARENT_AUTH_KEY = 'study_parent_auth_v1';
 const MODE_CHILD = 'child';
 const MODE_PARENT = 'parent';
-const PARENT_PASSWORD = 'study-parent-2026';
+const PARENT_PASSWORD = '159qwert';
 const WEEKDAY_OPTIONS = [
   { value: 1, label: '월' },
   { value: 2, label: '화' },
@@ -920,7 +920,6 @@ export default function App() {
                   onChange={(e) => setParentPasswordInput(e.target.value)}
                   placeholder="비밀번호 입력"
                 />
-                <small className="field-hint">현재 기본 비밀번호는 `study-parent-2026` 입니다.</small>
               </label>
               {authError && <div className="empty-state">{authError}</div>}
               <button type="button" className="primary-button full" onClick={handleParentLogin}>
