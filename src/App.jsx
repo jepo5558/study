@@ -519,6 +519,19 @@ export default function App() {
   const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
   const tabs = useMemo(() => createTabs(mode), [mode]);
   const todayTasks = useMemo(() => state.tasks.filter((task) => task.date === todayString()), [state.tasks]);
+  const pastTasks = useMemo(
+    () =>
+      state.tasks
+        .filter((task) => task.date < todayString())
+        .sort((left, right) => {
+          if (left.date !== right.date) {
+            return right.date.localeCompare(left.date);
+          }
+
+          return left.title.localeCompare(right.title, 'ko-KR');
+        }),
+    [state.tasks],
+  );
   const childBalances = useMemo(
     () => balances.filter((member) => member.role === MODE_CHILD),
     [balances],
@@ -1418,6 +1431,37 @@ export default function App() {
               )}
             </div>
           </section>
+
+          {mode === MODE_PARENT && (
+            <section className="panel">
+              <div className="section-head">
+                <h2>지난 날짜 과제</h2>
+                <p>오늘 이전에 등록된 과제도 여기에서 완료 처리할 수 있습니다.</p>
+              </div>
+              <div className="task-list">
+                {pastTasks.length === 0 ? (
+                  <div className="empty-state">업데이트할 지난 날짜 과제가 없습니다.</div>
+                ) : (
+                  pastTasks.map((task) => (
+                    <div key={task.id} className={task.completed ? 'task-row done' : 'task-row'}>
+                      <label className="task-check">
+                        <input type="checkbox" checked={task.completed} onChange={() => toggleTask(task.id)} />
+                        <span>
+                          <strong>{task.title}</strong>
+                          <small>
+                            {formatDate(task.date)} · {getMemberName(state.members, task.memberId)} · {task.category} · {task.points}점
+                          </small>
+                        </span>
+                      </label>
+                      <button type="button" className="ghost-button danger" onClick={() => deleteTask(task.id)}>
+                        삭제
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
 
           {mode === MODE_PARENT && (
             <section className="panel">
