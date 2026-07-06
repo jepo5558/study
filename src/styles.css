@@ -232,6 +232,10 @@ h1 {
   flex-wrap: wrap;
 }
 
+.row-actions.full {
+  grid-column: 1 / -1;
+}
+
 .form-grid,
 .inline-form {
   display: grid;
@@ -242,8 +246,52 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field > span {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.field-hint-inline {
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+
 .form-grid .full {
   grid-column: 1 / -1;
+}
+
+.weekday-chip-row,
+.preset-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip-button {
+  min-width: 42px;
+  min-height: 40px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+  padding: 0 12px;
+}
+
+.chip-button.active {
+  background: #111827;
+  color: #fff;
+  border-color: #111827;
 }
 
 .inline-form {
@@ -286,6 +334,7 @@ select {
 }
 
 .task-check span,
+.task-meta,
 .reward-row div,
 .message-row,
 .member-row {
