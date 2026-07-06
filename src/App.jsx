@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { supabase } from './supabase';
 
 const STORAGE_KEY = 'study_project_state_v1';
 const PARENT_AUTH_KEY = 'study_parent_auth_v1';
 const MODE_CHILD = 'child';
 const MODE_PARENT = 'parent';
 const PARENT_PASSWORD = '159qwert';
+const APP_STATE_ROW_ID = 'primary';
 const WEEKDAY_OPTIONS = [
   { value: 1, label: '월' },
   { value: 2, label: '화' },
@@ -149,6 +151,15 @@ function loadState() {
   }
 }
 
+function hasMeaningfulState(state) {
+  return (
+    state.members.length > 0 ||
+    state.tasks.length > 0 ||
+    state.rewards.length > 0 ||
+    state.cheers.length > 1
+  );
+}
+
 function sanitizeImportedState(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
 
@@ -217,8 +228,35 @@ function sanitizeImportedState(raw) {
   };
 }
 
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+async function fetchRemoteState() {
+  const { data, error } = await supabase
+    .from('app_state')
+    .select('data')
+    .eq('id', APP_STATE_ROW_ID)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.data ?? null;
+}
+
+async function saveRemoteState(state) {
+  const { error } = await supabase.from('app_state').upsert(
+    {
+      id: APP_STATE_ROW_ID,
+      data: state,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      onConflict: 'id',
+    },
+  );
+
+  if (error) {
+    throw error;
+  }
 }
 
 function startOfWeek(date = new Date()) {
@@ -480,22 +518,87 @@ function createTabs(mode) {
 }
 
 export default function App() {
-  const [state, setState] = useState(loadState);
+  const [state, setState] = useState(cloneDefaultState);
   const [mode, setMode] = useState(parseModeFromLocation);
   const [isParentAuthenticated, setIsParentAuthenticated] = useState(readParentAuth);
   const [parentPasswordInput, setParentPasswordInput] = useState('');
   const [authError, setAuthError] = useState('');
   const [tab, setTab] = useState('dashboard');
-  const [taskForm, setTaskForm] = useState(() => createEmptyTaskForm(loadState().members));
+  const [taskForm, setTaskForm] = useState(() => createEmptyTaskForm([]));
   const [editingTaskId, setEditingTaskId] = useState('');
-  const [rewardForm, setRewardForm] = useState(() => createEmptyRewardForm(loadState().members));
+  const [rewardForm, setRewardForm] = useState(() => createEmptyRewardForm([]));
   const [cheerText, setCheerText] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState(MODE_CHILD);
   const [importStatus, setImportStatus] = useState('');
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [syncMessage, setSyncMessage] = useState('');
+  const hasLoadedRemoteState = useRef(false);
 
   useEffect(() => {
-    saveState(state);
+    let active = true;
+
+    const bootstrap = async () => {
+      try {
+        const remoteData = await fetchRemoteState();
+        if (!active) {
+          return;
+        }
+
+        if (remoteData) {
+          setState(sanitizeImportedState(remoteData));
+        } else {
+          const localState = loadState();
+          const nextState = hasMeaningfulState(localState) ? sanitizeImportedState(localState) : cloneDefaultState();
+          await saveRemoteState(nextState);
+          if (!active) {
+            return;
+          }
+          setState(nextState);
+        }
+
+        hasLoadedRemoteState.current = true;
+        setSyncMessage('');
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        const fallbackState = sanitizeImportedState(loadState());
+        setState(hasMeaningfulState(fallbackState) ? fallbackState : cloneDefaultState());
+        hasLoadedRemoteState.current = true;
+        setSyncMessage('Supabase 연결에 실패해서 이 브라우저의 로컬 데이터로 표시 중입니다.');
+      } finally {
+        if (active) {
+          setIsBootstrapping(false);
+        }
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedRemoteState.current) {
+      return undefined;
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+    const timer = setTimeout(async () => {
+      try {
+        await saveRemoteState(state);
+        setSyncMessage('');
+      } catch {
+        setSyncMessage('Supabase 저장에 실패했습니다. 네트워크 또는 테이블 설정을 확인하세요.');
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [state]);
 
   useEffect(() => {
@@ -1078,6 +1181,21 @@ export default function App() {
 
   const parentLocked = mode === MODE_PARENT && !isParentAuthenticated;
 
+  if (isBootstrapping) {
+    return (
+      <div className="app-shell">
+        <main className="content-grid">
+          <section className="panel">
+            <div className="section-head">
+              <h2>데이터 불러오는 중</h2>
+              <p>Supabase에서 shared state를 읽고 있습니다.</p>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   if (parentLocked) {
     return (
       <div className="app-shell">
@@ -1181,6 +1299,12 @@ export default function App() {
           <p className="muted">{mode === MODE_CHILD ? latestCheer : '이번 주 완료 과제 기준'}</p>
         </article>
       </section>
+
+      {syncMessage && (
+        <section className="panel">
+          <div className="empty-state">{syncMessage}</div>
+        </section>
+      )}
 
       <nav className="tabbar" aria-label="study sections">
         {tabs.map((item) => (
