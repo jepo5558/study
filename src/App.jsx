@@ -105,6 +105,74 @@ function loadState() {
   }
 }
 
+function sanitizeImportedState(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+
+  const members = Array.isArray(source.members)
+    ? source.members
+        .filter((member) => member && typeof member === 'object')
+        .map((member) => ({
+          id: String(member.id ?? crypto.randomUUID()),
+          name: String(member.name ?? '').trim(),
+          role: member.role === MODE_PARENT ? MODE_PARENT : MODE_CHILD,
+        }))
+        .filter((member) => member.name)
+    : [];
+
+  const memberIds = new Set(members.map((member) => member.id));
+
+  const tasks = Array.isArray(source.tasks)
+    ? source.tasks
+        .filter((task) => task && typeof task === 'object')
+        .map((task) => ({
+          id: String(task.id ?? crypto.randomUUID()),
+          title: String(task.title ?? '').trim(),
+          memberId: String(task.memberId ?? ''),
+          date: String(task.date ?? todayString()),
+          points: Number(task.points || 0),
+          category: String(task.category ?? '기타').trim() || '기타',
+          fixed: Boolean(task.fixed),
+          seriesId: String(task.seriesId ?? ''),
+          repeatDays: Array.isArray(task.repeatDays) ? task.repeatDays.map((day) => Number(day)).filter((day) => Number.isInteger(day)) : [],
+          completed: Boolean(task.completed),
+          completedAt: String(task.completedAt ?? ''),
+        }))
+        .filter((task) => task.title && memberIds.has(task.memberId))
+    : [];
+
+  const rewards = Array.isArray(source.rewards)
+    ? source.rewards
+        .filter((reward) => reward && typeof reward === 'object')
+        .map((reward) => ({
+          id: String(reward.id ?? crypto.randomUUID()),
+          title: String(reward.title ?? '').trim(),
+          memberId: String(reward.memberId ?? ''),
+          pointsRequired: Number(reward.pointsRequired || 0),
+          status: ['available', 'requested', 'used'].includes(reward.status) ? reward.status : 'available',
+          updatedAt: String(reward.updatedAt ?? new Date().toISOString()),
+        }))
+        .filter((reward) => reward.title && memberIds.has(reward.memberId))
+    : [];
+
+  const cheers = Array.isArray(source.cheers)
+    ? source.cheers
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => ({
+          id: String(item.id ?? crypto.randomUUID()),
+          message: String(item.message ?? '').trim(),
+          createdAt: String(item.createdAt ?? new Date().toISOString()),
+        }))
+        .filter((item) => item.message)
+    : [];
+
+  return {
+    members,
+    tasks,
+    cheers: cheers.length > 0 ? cheers : cloneDefaultState().cheers,
+    rewards,
+  };
+}
+
 function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -378,6 +446,7 @@ export default function App() {
   const [cheerText, setCheerText] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState(MODE_CHILD);
+  const [importStatus, setImportStatus] = useState('');
 
   useEffect(() => {
     saveState(state);
@@ -848,6 +917,7 @@ export default function App() {
     setCheerText('');
     setMemberName('');
     setMemberRole(MODE_CHILD);
+    setImportStatus('');
   };
 
   const handleParentLogin = () => {
@@ -885,6 +955,51 @@ export default function App() {
       selectedWeekdays: weekdays,
       fixed: true,
     }));
+  };
+
+  const exportState = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      storageKey: STORAGE_KEY,
+      data: state,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `study-backup-${todayString()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setImportStatus('현재 데이터를 백업 파일로 저장했습니다.');
+  };
+
+  const importStateFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const nextState = sanitizeImportedState(parsed?.data ?? parsed);
+
+      if (!window.confirm('가져온 데이터로 현재 데이터를 덮어쓸까요?')) {
+        return;
+      }
+
+      setState(nextState);
+      setTaskForm(createEmptyTaskForm(nextState.members));
+      setEditingTaskId('');
+      setRewardForm(createEmptyRewardForm(nextState.members));
+      setImportStatus(`데이터를 가져왔습니다. 구성원 ${nextState.members.length}명, 과제 ${nextState.tasks.length}건`);
+    } catch {
+      setImportStatus('가져오기에 실패했습니다. JSON 백업 파일을 확인하세요.');
+    }
   };
 
   const parentLocked = mode === MODE_PARENT && !isParentAuthenticated;
@@ -1082,6 +1197,33 @@ export default function App() {
               {balances.length === 0 && <div className="empty-state">먼저 구성원을 추가하세요.</div>}
             </div>
           </section>
+
+          {mode === MODE_PARENT && (
+            <section className="panel">
+              <div className="section-head">
+                <h2>데이터 이전</h2>
+                <p>localhost 데이터는 직접 읽을 수 없으니 백업 파일로 옮깁니다.</p>
+              </div>
+              <div className="form-grid">
+                <div className="field full">
+                  <span>1. 로컬에서 백업</span>
+                  <small className="field-hint">
+                    예전 localhost 화면을 열어서 같은 기능의 백업 버튼으로 JSON 파일을 저장한 뒤, 여기에서 가져오면 됩니다.
+                  </small>
+                </div>
+                <div className="row-actions full">
+                  <button type="button" className="ghost-button" onClick={exportState}>
+                    현재 데이터 백업
+                  </button>
+                  <label className="ghost-button file-button">
+                    백업 파일 가져오기
+                    <input type="file" accept="application/json" onChange={importStateFromFile} />
+                  </label>
+                </div>
+                {importStatus && <div className="empty-state">{importStatus}</div>}
+              </div>
+            </section>
+          )}
         </main>
       )}
 

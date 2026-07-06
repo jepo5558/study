@@ -128,6 +128,21 @@ h1 {
   border-color: #111827;
 }
 
+.file-button {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .ghost-button.danger {
   color: #b91c1c;
   border-color: #fecaca;
