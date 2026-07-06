@@ -381,7 +381,9 @@ function buildWeekSeries(tasks) {
     return {
       dateKey,
       label: formatDate(dateKey),
+      totalCount: dayTasks.length,
       completedCount: dayTasks.filter((task) => task.completed).length,
+      completionRate: dayTasks.length > 0 ? Math.round((dayTasks.filter((task) => task.completed).length / dayTasks.length) * 100) : 0,
       points: dayTasks
         .filter((task) => task.completed)
         .reduce((sum, task) => sum + Number(task.points || 0), 0),
@@ -1211,13 +1213,15 @@ export default function App() {
                     <div
                       className="week-bar"
                       style={{
-                        height: `${Math.max(12, Math.min(100, item.points))}%`,
+                        height: `${item.totalCount === 0 ? 12 : Math.max(12, item.completionRate)}%`,
                       }}
                     />
                   </div>
                   <span className="week-label">{item.label}</span>
-                  <strong>{item.completedCount}개</strong>
-                  <small>{item.points}점</small>
+                  <strong>{item.completionRate}%</strong>
+                  <small>
+                    {item.completedCount}/{item.totalCount || 0}개
+                  </small>
                 </div>
               ))}
             </div>
