@@ -429,6 +429,14 @@ function buildWeekSeries(tasks) {
   });
 }
 
+function getDefaultDashboardMemberId(members, mode) {
+  if (mode === MODE_CHILD) {
+    return members.find((member) => member.role === MODE_CHILD)?.id ?? members[0]?.id ?? '';
+  }
+
+  return members[0]?.id ?? '';
+}
+
 function getSuggestedNudge(tasks) {
   const unfinished = tasks.filter((task) => !task.completed);
 
@@ -530,6 +538,7 @@ export default function App() {
   const [cheerText, setCheerText] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState(MODE_CHILD);
+  const [dashboardMemberId, setDashboardMemberId] = useState('');
   const [importStatus, setImportStatus] = useState('');
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [syncMessage, setSyncMessage] = useState('');
@@ -638,7 +647,28 @@ export default function App() {
         state.members[0]?.id ||
         '',
     }));
+
+    setDashboardMemberId((current) => {
+      if (current && memberIds.has(current)) {
+        return current;
+      }
+
+      return getDefaultDashboardMemberId(state.members, mode);
+    });
   }, [state.members]);
+
+  useEffect(() => {
+    const allowedMembers = mode === MODE_CHILD ? state.members.filter((member) => member.role === MODE_CHILD) : state.members;
+    const allowedIds = new Set(allowedMembers.map((member) => member.id));
+
+    setDashboardMemberId((current) => {
+      if (current && allowedIds.has(current)) {
+        return current;
+      }
+
+      return getDefaultDashboardMemberId(allowedMembers, mode);
+    });
+  }, [mode, state.members]);
 
   useEffect(() => {
     const allowedTabs = createTabs(mode);
@@ -648,10 +678,22 @@ export default function App() {
   }, [mode, tab]);
 
   const balances = useMemo(() => computeMemberBalances(state), [state]);
-  const weekSeries = useMemo(() => buildWeekSeries(state.tasks), [state.tasks]);
+  const dashboardMembers = useMemo(
+    () => (mode === MODE_CHILD ? state.members.filter((member) => member.role === MODE_CHILD) : state.members),
+    [mode, state.members],
+  );
+  const selectedDashboardMember = useMemo(
+    () => state.members.find((member) => member.id === dashboardMemberId) ?? null,
+    [dashboardMemberId, state.members],
+  );
+  const dashboardTasks = useMemo(
+    () => (dashboardMemberId ? state.tasks.filter((task) => task.memberId === dashboardMemberId) : []),
+    [dashboardMemberId, state.tasks],
+  );
+  const weekSeries = useMemo(() => buildWeekSeries(dashboardTasks), [dashboardTasks]);
   const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
   const tabs = useMemo(() => createTabs(mode), [mode]);
-  const todayTasks = useMemo(() => state.tasks.filter((task) => task.date === todayString()), [state.tasks]);
+  const todayTasks = useMemo(() => dashboardTasks.filter((task) => task.date === todayString()), [dashboardTasks]);
   const editableWeekTasks = useMemo(() => {
     const allowedDateKeys = new Set(getCurrentWeekDateKeysBeforeToday());
 
@@ -728,7 +770,7 @@ export default function App() {
     .filter((task) => task.completed)
     .reduce((sum, task) => sum + Number(task.points || 0), 0);
 
-  const totalCompletedTasks = state.tasks.filter((task) => task.completed).length;
+  const totalCompletedTasks = dashboardTasks.filter((task) => task.completed).length;
   const thisWeekPoints = weekSeries.reduce((sum, item) => sum + item.points, 0);
 
   const addMember = () => {
@@ -1330,6 +1372,17 @@ export default function App() {
                   : '이번 주 완료 흐름과 누적 점수를 봅니다.'}
               </p>
             </div>
+            {dashboardMembers.length > 0 && (
+              <div className="inline-form member-picker">
+                <select value={dashboardMemberId} onChange={(e) => setDashboardMemberId(e.target.value)}>
+                  {dashboardMembers.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="week-chart">
               {weekSeries.map((item) => (
                 <div key={item.dateKey} className="week-column">
@@ -1367,7 +1420,7 @@ export default function App() {
                   <div key={task.id} className="mini-row">
                     <span>{task.completed ? '완료' : '대기'}</span>
                     <strong>{task.title}</strong>
-                    <small>{getMemberName(state.members, task.memberId)}</small>
+                    <small>{selectedDashboardMember?.name ?? getMemberName(state.members, task.memberId)}</small>
                   </div>
                 ))
               )}
@@ -1380,7 +1433,9 @@ export default function App() {
               <p>{mode === MODE_CHILD ? '아이 구성원 기준 점수 현황입니다.' : '구성원별 보유 점수와 완료 과제 수입니다.'}</p>
             </div>
             <div className="table-list">
-              {(mode === MODE_CHILD ? childBalances : balances).map((member) => (
+              {(mode === MODE_CHILD ? childBalances : balances)
+                .filter((member) => !dashboardMemberId || member.id === dashboardMemberId)
+                .map((member) => (
                 <div key={member.id} className="table-row">
                   <div>
                     <strong>{member.name}</strong>

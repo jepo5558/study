@@ -314,6 +314,11 @@ h1 {
   margin-bottom: 14px;
 }
 
+.member-picker {
+  grid-template-columns: minmax(180px, 260px);
+  margin-bottom: 14px;
+}
+
 input,
 select {
   min-height: 42px;
