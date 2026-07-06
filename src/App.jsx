@@ -32,8 +32,24 @@ function cloneDefaultState() {
   return structuredClone(defaultState);
 }
 
+function toLocalDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateValue(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  return new Date(value);
+}
+
 function todayString() {
-  return new Date().toISOString().split('T')[0];
+  return toLocalDateKey(new Date());
 }
 
 function parseModeFromLocation() {
@@ -194,7 +210,7 @@ function startOfMonth(date = new Date()) {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleDateString('ko-KR', {
+  return parseDateValue(value).toLocaleDateString('ko-KR', {
     month: '2-digit',
     day: '2-digit',
     weekday: 'short',
@@ -223,7 +239,7 @@ function getMemberName(members, memberId) {
 }
 
 function getWeekdayValue(dateString) {
-  return new Date(dateString).getDay();
+  return parseDateValue(dateString).getDay();
 }
 
 function getWeekdayLabel(value) {
@@ -231,9 +247,9 @@ function getWeekdayLabel(value) {
 }
 
 function addDays(dateString, days) {
-  const current = new Date(dateString);
+  const current = parseDateValue(dateString);
   current.setDate(current.getDate() + days);
-  return current.toISOString().split('T')[0];
+  return toLocalDateKey(current);
 }
 
 function normalizeWeekdays(selectedWeekdays, dateString) {
@@ -312,7 +328,7 @@ function computeMemberBalances(state) {
         return false;
       }
 
-      const taskDate = new Date(task.date);
+      const taskDate = parseDateValue(task.date);
       return taskDate >= weekStart && taskDate < weekEnd;
     });
 
@@ -331,7 +347,7 @@ function buildWeekSeries(tasks) {
   return Array.from({ length: 7 }, (_, index) => {
     const current = new Date(base);
     current.setDate(base.getDate() + index);
-    const dateKey = current.toISOString().split('T')[0];
+    const dateKey = toLocalDateKey(current);
     const dayTasks = tasks.filter((task) => task.date === dateKey);
 
     return {
@@ -397,8 +413,8 @@ function buildHistoryGroups(tasks, members) {
       }));
   };
 
-  const weekTasks = tasks.filter((task) => new Date(task.date) >= weekStart);
-  const monthTasks = tasks.filter((task) => new Date(task.date) >= monthStart);
+  const weekTasks = tasks.filter((task) => parseDateValue(task.date) >= weekStart);
+  const monthTasks = tasks.filter((task) => parseDateValue(task.date) >= monthStart);
 
   return {
     week: {
@@ -417,7 +433,7 @@ function buildHistoryGroups(tasks, members) {
 function createTabs(mode) {
   if (mode === MODE_CHILD) {
     return [
-      { id: 'dashboard', label: '오늘 보기' },
+      { id: 'dashboard', label: '이번 주 보기' },
       { id: 'tasks', label: '과제' },
       { id: 'rewards', label: '보상' },
     ];
@@ -1125,10 +1141,10 @@ export default function App() {
         <main className="content-grid">
           <section className="panel">
             <div className="section-head">
-              <h2>{mode === MODE_CHILD ? '오늘 보기' : '주간 리포트'}</h2>
+              <h2>{mode === MODE_CHILD ? '이번 주 보기' : '주간 리포트'}</h2>
               <p>
                 {mode === MODE_CHILD
-                  ? '오늘 해야 할 과제를 빠르게 확인합니다.'
+                  ? '월요일부터 일요일까지의 과제 흐름을 확인합니다.'
                   : '이번 주 완료 흐름과 누적 점수를 봅니다.'}
               </p>
             </div>
