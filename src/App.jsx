@@ -57,6 +57,20 @@ function normalizeDateKey(value) {
   return toLocalDateKey(parsed);
 }
 
+function getCurrentWeekDateKeysBeforeToday() {
+  const weekStart = startOfWeek();
+  const todayKey = todayString();
+  const keys = [];
+  const cursor = new Date(weekStart);
+
+  while (toLocalDateKey(cursor) < todayKey) {
+    keys.push(toLocalDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return keys;
+}
+
 function todayString() {
   return toLocalDateKey(new Date());
 }
@@ -534,14 +548,10 @@ export default function App() {
   const tabs = useMemo(() => createTabs(mode), [mode]);
   const todayTasks = useMemo(() => state.tasks.filter((task) => task.date === todayString()), [state.tasks]);
   const editableWeekTasks = useMemo(() => {
-    const weekStart = startOfWeek();
-    const today = parseDateValue(todayString());
+    const allowedDateKeys = new Set(getCurrentWeekDateKeysBeforeToday());
 
     return state.tasks
-      .filter((task) => {
-        const taskDate = parseDateValue(task.date);
-        return taskDate >= weekStart && taskDate < today;
-      })
+      .filter((task) => allowedDateKeys.has(task.date))
       .sort((left, right) => {
         if (left.date !== right.date) {
           return right.date.localeCompare(left.date);
