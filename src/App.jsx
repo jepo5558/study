@@ -521,17 +521,12 @@ export default function App() {
   const todayTasks = useMemo(() => state.tasks.filter((task) => task.date === todayString()), [state.tasks]);
   const editableWeekTasks = useMemo(() => {
     const weekStart = startOfWeek();
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 7);
+    const today = parseDateValue(todayString());
 
     return state.tasks
       .filter((task) => {
-        if (task.date === todayString()) {
-          return false;
-        }
-
         const taskDate = parseDateValue(task.date);
-        return taskDate >= weekStart && taskDate < weekEnd;
+        return taskDate >= weekStart && taskDate < today;
       })
       .sort((left, right) => {
         if (left.date !== right.date) {
@@ -712,6 +707,21 @@ export default function App() {
               ...task,
               completed: !task.completed,
               completedAt: !task.completed ? new Date().toISOString() : '',
+            }
+          : task,
+      ),
+    }));
+  };
+
+  const setTaskCompletion = (taskId, completed) => {
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              completed,
+              completedAt: completed ? task.completedAt || new Date().toISOString() : '',
             }
           : task,
       ),
@@ -1445,26 +1455,39 @@ export default function App() {
             <section className="panel">
               <div className="section-head">
                 <h2>이번 주 과제 업데이트</h2>
-                <p>이번 주 월요일부터 일요일까지의 과제 중 오늘을 제외한 항목을 여기에서 수정합니다.</p>
+                <p>이번 주 월요일부터 어제까지의 과제만 여기에서 완료 상태를 수정합니다.</p>
               </div>
               <div className="task-list">
                 {editableWeekTasks.length === 0 ? (
-                  <div className="empty-state">이번 주에 업데이트할 과제가 없습니다.</div>
+                  <div className="empty-state">이번 주의 지난 날짜 과제가 없습니다.</div>
                 ) : (
                   editableWeekTasks.map((task) => (
                     <div key={task.id} className={task.completed ? 'task-row done' : 'task-row'}>
-                      <label className="task-check">
-                        <input type="checkbox" checked={task.completed} onChange={() => toggleTask(task.id)} />
-                        <span>
-                          <strong>{task.title}</strong>
-                          <small>
-                            {formatDate(task.date)} · {getMemberName(state.members, task.memberId)} · {task.category} · {task.points}점
-                          </small>
-                        </span>
-                      </label>
-                      <button type="button" className="ghost-button danger" onClick={() => deleteTask(task.id)}>
-                        삭제
-                      </button>
+                      <div className="task-meta">
+                        <strong>{task.title}</strong>
+                        <small>
+                          {formatDate(task.date)} · {getMemberName(state.members, task.memberId)} · {task.category} · {task.points}점
+                        </small>
+                      </div>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className={task.completed ? 'tab-button active' : 'tab-button'}
+                          onClick={() => setTaskCompletion(task.id, true)}
+                        >
+                          완료
+                        </button>
+                        <button
+                          type="button"
+                          className={!task.completed ? 'tab-button active' : 'tab-button'}
+                          onClick={() => setTaskCompletion(task.id, false)}
+                        >
+                          미완료
+                        </button>
+                        <button type="button" className="ghost-button danger" onClick={() => deleteTask(task.id)}>
+                          삭제
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
