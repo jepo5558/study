@@ -1337,8 +1337,8 @@ export default function App() {
 
         <article className="hero-card">
           <span className="metric-label">{mode === MODE_CHILD ? '오늘 응원' : '이번 주 획득 점수'}</span>
-          <strong className="metric-value">{mode === MODE_CHILD ? '한마디' : thisWeekPoints}</strong>
-          <p className="muted">{mode === MODE_CHILD ? latestCheer : '이번 주 완료 과제 기준'}</p>
+          <strong className="metric-value">{mode === MODE_CHILD ? latestCheer : thisWeekPoints}</strong>
+          <p className="muted">{mode === MODE_CHILD ? '한마디' : '이번 주 완료 과제 기준'}</p>
         </article>
       </section>
 
