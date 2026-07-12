@@ -738,6 +738,24 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
     .map((item) => `${item.memberName} ${item.completed}회`)
     .join(', ');
 
+  const weakestTaskTargets = weakestTaskLearning
+    ? Array.from(taskTitleMemberMap.values())
+        .filter((item) => item.total > 0 && item.title === weakestTaskLearning.title)
+        .map((item) => ({
+          ...item,
+          failureCount: item.total - item.completed,
+          failureRate: item.total > 0 ? Math.round(((item.total - item.completed) / item.total) * 100) : 0,
+        }))
+        .filter((item) => item.failureCount > 0)
+        .sort((left, right) => right.failureCount - left.failureCount || right.failureRate - left.failureRate || left.memberName.localeCompare(right.memberName, 'ko-KR'))
+    : [];
+
+  const topWeakestTaskFailureCount = weakestTaskTargets[0]?.failureCount ?? 0;
+  const weakestTaskTargetSummary = weakestTaskTargets
+    .filter((item) => item.failureCount === topWeakestTaskFailureCount && item.failureCount > 0)
+    .map((item) => `${item.memberName} ${item.failureCount}회`)
+    .join(', ');
+
   const memberPointSummary = memberStats
     .filter((member) => member.totalTasks > 0)
     .map((member) => `${member.name} ${member.earnedPoints}점`)
@@ -784,6 +802,7 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       bestTaskLearning,
       bestTaskLeaderSummary,
       weakestTaskLearning,
+      weakestTaskTargetSummary,
       memberPointSummary,
     },
     memberFeedback,
@@ -2244,7 +2263,7 @@ export default function App() {
                 <strong>실패율이 가장 높았던 학습명</strong>
                 <small>
                   {weeklyReport.learningInsights.weakestTaskLearning
-                    ? `${weeklyReport.learningInsights.weakestTaskLearning.title} · 실패율 ${weeklyReport.learningInsights.weakestTaskLearning.failureRate}% · ${weeklyReport.learningInsights.weakestTaskLearning.total}개 중 ${weeklyReport.learningInsights.weakestTaskLearning.completed}개 완료`
+                    ? `${weeklyReport.learningInsights.weakestTaskLearning.title} · 실패율 ${weeklyReport.learningInsights.weakestTaskLearning.failureRate}% · ${weeklyReport.learningInsights.weakestTaskLearning.total}개 중 ${weeklyReport.learningInsights.weakestTaskLearning.completed}개 완료${weeklyReport.learningInsights.weakestTaskTargetSummary ? ` · 가장 많이 놓친 사람 ${weeklyReport.learningInsights.weakestTaskTargetSummary}` : ''}`
                     : '데이터 없음'}
                 </small>
               </div>
