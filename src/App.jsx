@@ -583,12 +583,20 @@ function buildWeeklyReport(state) {
   const bestDay = [...weekSeries].sort((left, right) => right.completionRate - left.completionRate || right.completedCount - left.completedCount)[0] ?? null;
 
   const categoryMap = new Map();
+  const taskTitleMap = new Map();
   weekTasks.forEach((task) => {
     const current = categoryMap.get(task.category) ?? { total: 0, completed: 0, points: 0 };
     categoryMap.set(task.category, {
       total: current.total + 1,
       completed: current.completed + (task.completed ? 1 : 0),
       points: current.points + (task.completed ? Number(task.points || 0) : 0),
+    });
+
+    const taskCurrent = taskTitleMap.get(task.title) ?? { total: 0, completed: 0, points: 0 };
+    taskTitleMap.set(task.title, {
+      total: taskCurrent.total + 1,
+      completed: taskCurrent.completed + (task.completed ? 1 : 0),
+      points: taskCurrent.points + (task.completed ? Number(task.points || 0) : 0),
     });
   });
 
@@ -604,6 +612,20 @@ function buildWeeklyReport(state) {
   const weakLearning = [...learningSummary]
     .filter((item) => item.total > 0)
     .sort((left, right) => left.completionRate - right.completionRate || right.total - left.total)[0] ?? null;
+
+  const taskLearningSummary = Array.from(taskTitleMap.entries())
+    .map(([title, value]) => ({
+      title,
+      ...value,
+      completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
+      failureRate: value.total > 0 ? Math.round(((value.total - value.completed) / value.total) * 100) : 0,
+    }))
+    .sort((left, right) => right.completed - left.completed || right.points - left.points);
+
+  const bestTaskLearning = taskLearningSummary[0] ?? null;
+  const weakestTaskLearning = [...taskLearningSummary]
+    .filter((item) => item.total > 0)
+    .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total)[0] ?? null;
 
   const nextAction =
     summary.totalTasks === 0
@@ -629,6 +651,8 @@ function buildWeeklyReport(state) {
     learningInsights: {
       strongLearning,
       weakLearning,
+      bestTaskLearning,
+      weakestTaskLearning,
     },
     nextAction,
   };
@@ -2061,18 +2085,18 @@ export default function App() {
             </div>
             <div className="mini-list">
               <div className="message-row">
-                <strong>가장 잘한 학습</strong>
+                <strong>가장 잘한 학습명</strong>
                 <small>
-                  {weeklyReport.learningInsights.strongLearning
-                    ? `${weeklyReport.learningInsights.strongLearning.title} · 완료율 ${weeklyReport.learningInsights.strongLearning.completionRate}% · ${weeklyReport.learningInsights.strongLearning.completed}개 완료`
+                  {weeklyReport.learningInsights.bestTaskLearning
+                    ? `${weeklyReport.learningInsights.bestTaskLearning.title} · 완료율 ${weeklyReport.learningInsights.bestTaskLearning.completionRate}% · ${weeklyReport.learningInsights.bestTaskLearning.completed}개 완료`
                     : '데이터 없음'}
                 </small>
               </div>
               <div className="message-row">
-                <strong>보완이 필요한 학습</strong>
+                <strong>실패율이 가장 높았던 학습명</strong>
                 <small>
-                  {weeklyReport.learningInsights.weakLearning
-                    ? `${weeklyReport.learningInsights.weakLearning.title} · 완료율 ${weeklyReport.learningInsights.weakLearning.completionRate}% · ${weeklyReport.learningInsights.weakLearning.total}개 중 ${weeklyReport.learningInsights.weakLearning.completed}개 완료`
+                  {weeklyReport.learningInsights.weakestTaskLearning
+                    ? `${weeklyReport.learningInsights.weakestTaskLearning.title} · 실패율 ${weeklyReport.learningInsights.weakestTaskLearning.failureRate}% · ${weeklyReport.learningInsights.weakestTaskLearning.total}개 중 ${weeklyReport.learningInsights.weakestTaskLearning.completed}개 완료`
                     : '데이터 없음'}
                 </small>
               </div>
