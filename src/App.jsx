@@ -575,9 +575,9 @@ function buildWeeklyReport(state) {
     };
   });
 
-  const mvp = [...memberStats].sort((left, right) => right.earnedPoints - left.earnedPoints || right.completionRate - left.completionRate)[0] ?? null;
-  const steadyWinner = [...memberStats].sort((left, right) => right.dailyHits - left.dailyHits || right.completionRate - left.completionRate)[0] ?? null;
-  const routineWinner = [...memberStats].sort((left, right) => right.repeatedTaskSuccess - left.repeatedTaskSuccess || right.completionRate - left.completionRate)[0] ?? null;
+  const mvpRank = [...memberStats].sort((left, right) => right.earnedPoints - left.earnedPoints || right.completionRate - left.completionRate).slice(0, 2);
+  const steadyRank = [...memberStats].sort((left, right) => right.dailyHits - left.dailyHits || right.completionRate - left.completionRate).slice(0, 2);
+  const routineRank = [...memberStats].sort((left, right) => right.repeatedTaskSuccess - left.repeatedTaskSuccess || right.completionRate - left.completionRate).slice(0, 2);
 
   const weekSeries = buildWeekSeries(weekTasks);
   const bestDay = [...weekSeries].sort((left, right) => right.completionRate - left.completionRate || right.completedCount - left.completedCount)[0] ?? null;
@@ -592,13 +592,18 @@ function buildWeeklyReport(state) {
     });
   });
 
-  const categorySummary = Array.from(categoryMap.entries())
+  const learningSummary = Array.from(categoryMap.entries())
     .map(([category, value]) => ({
-      category,
+      title: category,
       ...value,
       completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
     }))
     .sort((left, right) => right.completed - left.completed || right.points - left.points);
+
+  const strongLearning = learningSummary[0] ?? null;
+  const weakLearning = [...learningSummary]
+    .filter((item) => item.total > 0)
+    .sort((left, right) => left.completionRate - right.completionRate || right.total - left.total)[0] ?? null;
 
   const nextAction =
     summary.totalTasks === 0
@@ -614,12 +619,16 @@ function buildWeeklyReport(state) {
     summary,
     memberStats,
     weekSeries,
-    categorySummary,
+    learningSummary,
     awards: {
-      mvp,
-      steadyWinner,
-      routineWinner,
+      mvpRank,
+      steadyRank,
+      routineRank,
       bestDay,
+    },
+    learningInsights: {
+      strongLearning,
+      weakLearning,
     },
     nextAction,
   };
@@ -1970,15 +1979,27 @@ export default function App() {
             <div className="mini-list">
               <div className="message-row">
                 <strong>MVP</strong>
-                <small>{weeklyReport.awards.mvp ? `${weeklyReport.awards.mvp.name} · ${weeklyReport.awards.mvp.earnedPoints}점 · 완료율 ${weeklyReport.awards.mvp.completionRate}%` : '데이터 없음'}</small>
+                <small>
+                  {weeklyReport.awards.mvpRank[0]
+                    ? `1위 ${weeklyReport.awards.mvpRank[0].name} · ${weeklyReport.awards.mvpRank[0].earnedPoints}점 / 2위 ${weeklyReport.awards.mvpRank[1]?.name ?? '-'}`
+                    : '데이터 없음'}
+                </small>
               </div>
               <div className="message-row">
                 <strong>성실왕</strong>
-                <small>{weeklyReport.awards.steadyWinner ? `${weeklyReport.awards.steadyWinner.name} · ${weeklyReport.awards.steadyWinner.dailyHits}일 달성` : '데이터 없음'}</small>
+                <small>
+                  {weeklyReport.awards.steadyRank[0]
+                    ? `1위 ${weeklyReport.awards.steadyRank[0].name} · ${weeklyReport.awards.steadyRank[0].dailyHits}일 / 2위 ${weeklyReport.awards.steadyRank[1]?.name ?? '-'}`
+                    : '데이터 없음'}
+                </small>
               </div>
               <div className="message-row">
                 <strong>루틴왕</strong>
-                <small>{weeklyReport.awards.routineWinner ? `${weeklyReport.awards.routineWinner.name} · 반복 과제 ${weeklyReport.awards.routineWinner.repeatedTaskSuccess}회 완료` : '데이터 없음'}</small>
+                <small>
+                  {weeklyReport.awards.routineRank[0]
+                    ? `1위 ${weeklyReport.awards.routineRank[0].name} · ${weeklyReport.awards.routineRank[0].repeatedTaskSuccess}회 / 2위 ${weeklyReport.awards.routineRank[1]?.name ?? '-'}`
+                    : '데이터 없음'}
+                </small>
               </div>
               <div className="message-row">
                 <strong>최고의 하루</strong>
@@ -2035,20 +2056,36 @@ export default function App() {
 
           <section className="panel">
             <div className="section-head">
-              <h2>카테고리 분석</h2>
-              <p>무엇을 가장 많이 해냈는지 봅니다.</p>
+              <h2>완료한 학습 분석</h2>
+              <p>이번 주에 잘 끝낸 학습과 부족했던 학습을 봅니다.</p>
             </div>
             <div className="mini-list">
-              {weeklyReport.categorySummary.length === 0 ? (
-                <div className="empty-state">이번 주 카테고리 데이터가 없습니다.</div>
+              <div className="message-row">
+                <strong>가장 잘한 학습</strong>
+                <small>
+                  {weeklyReport.learningInsights.strongLearning
+                    ? `${weeklyReport.learningInsights.strongLearning.title} · 완료율 ${weeklyReport.learningInsights.strongLearning.completionRate}% · ${weeklyReport.learningInsights.strongLearning.completed}개 완료`
+                    : '데이터 없음'}
+                </small>
+              </div>
+              <div className="message-row">
+                <strong>보완이 필요한 학습</strong>
+                <small>
+                  {weeklyReport.learningInsights.weakLearning
+                    ? `${weeklyReport.learningInsights.weakLearning.title} · 완료율 ${weeklyReport.learningInsights.weakLearning.completionRate}% · ${weeklyReport.learningInsights.weakLearning.total}개 중 ${weeklyReport.learningInsights.weakLearning.completed}개 완료`
+                    : '데이터 없음'}
+                </small>
+              </div>
+              {weeklyReport.learningSummary.length === 0 ? (
+                <div className="empty-state">이번 주 학습 데이터가 없습니다.</div>
               ) : (
-                weeklyReport.categorySummary.map((category) => (
-                  <div key={category.category} className="table-row">
-                    <strong>{category.category}</strong>
+                weeklyReport.learningSummary.map((item) => (
+                  <div key={item.title} className="table-row">
+                    <strong>{item.title}</strong>
                     <div className="row-stats">
-                      <span>완료율 {category.completionRate}%</span>
-                      <span>{category.completed}/{category.total}개</span>
-                      <span>{category.points}점</span>
+                      <span>완료율 {item.completionRate}%</span>
+                      <span>{item.completed}/{item.total}개</span>
+                      <span>{item.points}점</span>
                     </div>
                   </div>
                 ))
