@@ -561,6 +561,10 @@ function buildWeeklyReport(state) {
       };
     });
 
+    const lowestWeekday = [...weekdaySeries]
+      .filter((day) => day.totalCount > 0)
+      .sort((left, right) => left.completionRate - right.completionRate || right.totalCount - left.totalCount)[0] ?? null;
+
     return {
       ...member,
       totalTasks: tasks.length,
@@ -572,6 +576,7 @@ function buildWeeklyReport(state) {
       repeatedTaskSuccess: tasks.filter((task) => task.fixed && task.completed).length,
       dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
       weekdaySeries,
+      lowestWeekday,
     };
   });
 
@@ -627,19 +632,26 @@ function buildWeeklyReport(state) {
     .filter((item) => item.total > 0)
     .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total)[0] ?? null;
 
-  const lowestWeekday = [...weekSeries]
-    .filter((day) => day.totalCount > 0)
-    .sort((left, right) => left.completionRate - right.completionRate || right.totalCount - left.totalCount)[0] ?? null;
-
   const memberPointSummary = memberStats
     .filter((member) => member.totalTasks > 0)
     .map((member) => `${member.name} ${member.earnedPoints}점`)
     .join(' · ');
 
-  const nextAction =
-    summary.totalTasks === 0
-      ? '다음 주에는 먼저 반복 과제를 등록해서 흐름을 만드는 것이 좋습니다.'
-      : `다음 주에는 ${weakestTaskLearning?.title ?? '부족했던 학습'}을 먼저 챙기고, ${lowestWeekday?.label ?? '완료율이 낮았던 요일'} 흐름을 보완하는 것이 좋습니다.`;
+  const memberFeedback = memberStats.map((member) => {
+    if (member.totalTasks === 0) {
+      return {
+        memberId: member.id,
+        name: member.name,
+        message: '이번 주 기록이 적었습니다. 다음 주에는 먼저 반복 과제부터 시작해보세요.',
+      };
+    }
+
+    return {
+      memberId: member.id,
+      name: member.name,
+      message: `${member.weakCategory !== '-' ? `${member.weakCategory} 학습` : '부족했던 학습'}을 먼저 챙기고, ${member.lowestWeekday?.label ?? '약했던 요일'} 흐름을 보완하면 좋겠습니다.`,
+    };
+  });
 
   return {
     label: `${formatDate(weekStart)} - ${formatDate(addDays(toLocalDateKey(weekStart), 6))}`,
@@ -658,10 +670,9 @@ function buildWeeklyReport(state) {
       weakLearning,
       bestTaskLearning,
       weakestTaskLearning,
-      lowestWeekday,
       memberPointSummary,
     },
-    nextAction,
+    memberFeedback,
   };
 }
 
@@ -1997,9 +2008,15 @@ export default function App() {
               <div className="table-row">
                 <strong>다음 주 포인트</strong>
                 <div className="row-stats">
-                  <span>{weeklyReport.nextAction}</span>
+                  <span>참가자별 피드백</span>
                 </div>
               </div>
+              {weeklyReport.memberFeedback.map((item) => (
+                <div key={item.memberId} className="message-row">
+                  <strong>{item.name}</strong>
+                  <small>{item.message}</small>
+                </div>
+              ))}
             </div>
           </section>
 
