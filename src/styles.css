@@ -217,6 +217,48 @@ h1 {
   gap: 10px;
 }
 
+.report-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 12px;
+}
+
+.report-insight {
+  display: grid;
+  gap: 4px;
+}
+
+.mini-week-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.mini-week-column {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.mini-week-bar-wrap {
+  width: 100%;
+  height: 88px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  display: flex;
+  align-items: end;
+  overflow: hidden;
+}
+
+.mini-week-bar {
+  width: 100%;
+  background: #111827;
+}
+
 .mini-row,
 .task-row,
 .reward-row,

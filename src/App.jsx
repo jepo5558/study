@@ -510,6 +510,7 @@ function buildWeeklyReport(state) {
   const weekStart = startOfWeek();
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
+  const weekDateKeys = Array.from({ length: 7 }, (_, index) => addDays(toLocalDateKey(weekStart), index));
 
   const weekTasks = state.tasks.filter((task) => {
     const taskDate = parseDateValue(task.date);
@@ -539,9 +540,26 @@ function buildWeeklyReport(state) {
     const categories = Array.from(categoryMap.entries()).map(([category, value]) => ({
       category,
       ...value,
+      completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
     }));
 
-    const bestCategory = categories.sort((left, right) => right.completed - left.completed || right.total - left.total)[0] ?? null;
+    const bestCategory = [...categories].sort((left, right) => right.completionRate - left.completionRate || right.completed - left.completed)[0] ?? null;
+    const weakCategory = [...categories]
+      .filter((category) => category.total > 0)
+      .sort((left, right) => left.completionRate - right.completionRate || right.total - left.total)[0] ?? null;
+
+    const weekdaySeries = weekDateKeys.map((dateKey) => {
+      const dayTasks = tasks.filter((task) => task.date === dateKey);
+      const completedCount = dayTasks.filter((task) => task.completed).length;
+
+      return {
+        dateKey,
+        label: getWeekdayLabel(getWeekdayValue(dateKey)),
+        totalCount: dayTasks.length,
+        completedCount,
+        completionRate: dayTasks.length > 0 ? Math.round((completedCount / dayTasks.length) * 100) : 0,
+      };
+    });
 
     return {
       ...member,
@@ -550,8 +568,10 @@ function buildWeeklyReport(state) {
       completionRate: tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0,
       earnedPoints: completedTasks.reduce((sum, task) => sum + Number(task.points || 0), 0),
       bestCategory: bestCategory?.category ?? '-',
+      weakCategory: weakCategory?.category ?? '-',
       repeatedTaskSuccess: tasks.filter((task) => task.fixed && task.completed).length,
       dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
+      weekdaySeries,
     };
   });
 
@@ -1977,16 +1997,35 @@ export default function App() {
                 <div className="empty-state">등록된 구성원이 없습니다.</div>
               ) : (
                 weeklyReport.memberStats.map((member) => (
-                  <div key={member.id} className="table-row">
-                    <div>
-                      <strong>{member.name}</strong>
-                      <p>{member.role === MODE_PARENT ? '부모' : '아이'}</p>
+                  <div key={member.id} className="report-card">
+                    <div className="table-row">
+                      <div>
+                        <strong>{member.name}</strong>
+                        <p>{member.role === MODE_PARENT ? '부모' : '아이'}</p>
+                      </div>
+                      <div className="row-stats">
+                        <span>완료율 {member.completionRate}%</span>
+                        <span>{member.completedTasks}/{member.totalTasks}개</span>
+                        <span>{member.earnedPoints}점</span>
+                      </div>
                     </div>
-                    <div className="row-stats">
-                      <span>완료율 {member.completionRate}%</span>
-                      <span>{member.completedTasks}/{member.totalTasks}개</span>
-                      <span>{member.earnedPoints}점</span>
-                      <span>강점 {member.bestCategory}</span>
+                    <div className="report-insight">
+                      <small>잘한 항목: {member.bestCategory}</small>
+                      <small>보완할 항목: {member.weakCategory}</small>
+                    </div>
+                    <div className="mini-week-chart">
+                      {member.weekdaySeries.map((day) => (
+                        <div key={day.dateKey} className="mini-week-column">
+                          <div className="mini-week-bar-wrap">
+                            <div
+                              className="mini-week-bar"
+                              style={{ height: `${day.totalCount === 0 ? 10 : Math.max(10, day.completionRate)}%` }}
+                            />
+                          </div>
+                          <span className="week-label">{day.label}</span>
+                          <small>{day.completionRate}%</small>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))
