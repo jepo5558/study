@@ -259,6 +259,18 @@ h1 {
   background: #111827;
 }
 
+.mini-week-bar.high {
+  background: #2563eb;
+}
+
+.mini-week-bar.low {
+  background: #dc2626;
+}
+
+.mini-week-bar.neutral {
+  background: #64748b;
+}
+
 .mini-row,
 .task-row,
 .reward-row,
@@ -287,6 +299,14 @@ h1 {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.summary-stats {
+  min-width: 96px;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
 }
 
 .row-actions.full {

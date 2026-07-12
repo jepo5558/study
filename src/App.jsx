@@ -344,6 +344,27 @@ function getFullWeekdayLabel(value) {
   return labels[value] ?? '';
 }
 
+function getWeekdayBarTone(day, series) {
+  const activeDays = series.filter((item) => item.totalCount > 0);
+  if (day.totalCount === 0 || activeDays.length === 0) {
+    return 'neutral';
+  }
+
+  const rates = activeDays.map((item) => item.completionRate);
+  const highestRate = Math.max(...rates);
+  const lowestRate = Math.min(...rates);
+
+  if (day.completionRate === highestRate && highestRate !== lowestRate) {
+    return 'high';
+  }
+
+  if (day.completionRate === lowestRate && highestRate !== lowestRate) {
+    return 'low';
+  }
+
+  return 'neutral';
+}
+
 function addDays(dateString, days) {
   const current = parseDateValue(dateString);
   current.setDate(current.getDate() + days);
@@ -643,6 +664,7 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
 
   const categoryMap = new Map();
   const taskTitleMap = new Map();
+  const taskTitleMemberMap = new Map();
   weekTasks.forEach((task) => {
     const current = categoryMap.get(task.category) ?? { total: 0, completed: 0, points: 0 };
     categoryMap.set(task.category, {
@@ -656,6 +678,20 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       total: taskCurrent.total + 1,
       completed: taskCurrent.completed + (task.completed ? 1 : 0),
       points: taskCurrent.points + (task.completed ? Number(task.points || 0) : 0),
+    });
+
+    const memberTaskKey = `${task.title}::${task.memberId}`;
+    const currentMemberTask = taskTitleMemberMap.get(memberTaskKey) ?? {
+      title: task.title,
+      memberId: task.memberId,
+      memberName: getMemberName(state.members, task.memberId),
+      total: 0,
+      completed: 0,
+    };
+    taskTitleMemberMap.set(memberTaskKey, {
+      ...currentMemberTask,
+      total: currentMemberTask.total + 1,
+      completed: currentMemberTask.completed + (task.completed ? 1 : 0),
     });
   });
 
@@ -685,6 +721,22 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
   const weakestTaskLearning = [...taskLearningSummary]
     .filter((item) => item.total > 0)
     .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total)[0] ?? null;
+
+  const bestTaskLeaders = bestTaskLearning
+    ? Array.from(taskTitleMemberMap.values())
+        .filter((item) => item.total > 0 && item.title === bestTaskLearning.title)
+        .map((item) => ({
+          ...item,
+          completionRate: item.total > 0 ? Math.round((item.completed / item.total) * 100) : 0,
+        }))
+        .sort((left, right) => right.completed - left.completed || right.completionRate - left.completionRate || left.memberName.localeCompare(right.memberName, 'ko-KR'))
+    : [];
+
+  const topBestTaskCompleted = bestTaskLeaders[0]?.completed ?? 0;
+  const bestTaskLeaderSummary = bestTaskLeaders
+    .filter((item) => item.completed === topBestTaskCompleted && item.completed > 0)
+    .map((item) => `${item.memberName} ${item.completed}회`)
+    .join(', ');
 
   const memberPointSummary = memberStats
     .filter((member) => member.totalTasks > 0)
@@ -730,6 +782,7 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       strongLearning,
       weakLearning,
       bestTaskLearning,
+      bestTaskLeaderSummary,
       weakestTaskLearning,
       memberPointSummary,
     },
@@ -2063,7 +2116,7 @@ export default function App() {
             <div className="table-list">
               <div className="table-row">
                 <strong>완료율</strong>
-                <div className="row-stats">
+                <div className="row-stats summary-stats">
                   <span>{weeklyReport.summary.completionRate}%</span>
                   <span>{weeklyReport.summary.completedTasks}/{weeklyReport.summary.totalTasks}개</span>
                 </div>
@@ -2158,7 +2211,7 @@ export default function App() {
                         <div key={day.dateKey} className="mini-week-column">
                           <div className="mini-week-bar-wrap">
                             <div
-                              className="mini-week-bar"
+                              className={`mini-week-bar ${getWeekdayBarTone(day, member.weekdaySeries)}`}
                               style={{ height: `${day.totalCount === 0 ? 10 : Math.max(10, day.completionRate)}%` }}
                             />
                           </div>
@@ -2183,7 +2236,7 @@ export default function App() {
                 <strong>가장 잘한 학습명</strong>
                 <small>
                   {weeklyReport.learningInsights.bestTaskLearning
-                    ? `${weeklyReport.learningInsights.bestTaskLearning.title} · 완료율 ${weeklyReport.learningInsights.bestTaskLearning.completionRate}% · ${weeklyReport.learningInsights.bestTaskLearning.completed}개 완료`
+                    ? `${weeklyReport.learningInsights.bestTaskLearning.title} · 완료율 ${weeklyReport.learningInsights.bestTaskLearning.completionRate}% · ${weeklyReport.learningInsights.bestTaskLearning.completed}개 완료${weeklyReport.learningInsights.bestTaskLeaderSummary ? ` · 가장 잘한 사람 ${weeklyReport.learningInsights.bestTaskLeaderSummary}` : ''}`
                     : '데이터 없음'}
                 </small>
               </div>
