@@ -96,7 +96,7 @@ function isChildWeeklyReportPreviewEnabled() {
     return false;
   }
 
-  const source = `${window.location.search}${window.location.hash}`.toLowerCase();
+  const source = `${window.location.href}${window.location.search}${window.location.hash}`.toLowerCase();
   return source.includes('preview-weekly-report=1');
 }
 
@@ -1003,6 +1003,12 @@ export default function App() {
       setTab('dashboard');
     }
   }, [mode, reportContext.childVisible, tab]);
+
+  useEffect(() => {
+    if (mode === MODE_CHILD && isChildWeeklyReportPreviewEnabled() && reportContext.childVisible) {
+      setTab('weekly-report');
+    }
+  }, [mode, reportContext.childVisible]);
 
   const balances = useMemo(() => computeMemberBalances(state), [state]);
   const dashboardMembers = useMemo(
