@@ -330,6 +330,20 @@ function getWeekdayLabel(value) {
   return WEEKDAY_OPTIONS.find((item) => item.value === value)?.label ?? '';
 }
 
+function getFullWeekdayLabel(value) {
+  const labels = {
+    0: '일요일',
+    1: '월요일',
+    2: '화요일',
+    3: '수요일',
+    4: '목요일',
+    5: '금요일',
+    6: '토요일',
+  };
+
+  return labels[value] ?? '';
+}
+
 function addDays(dateString, days) {
   const current = parseDateValue(dateString);
   current.setDate(current.getDate() + days);
@@ -546,12 +560,19 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
     const tasks = weekTasks.filter((task) => task.memberId === member.id);
     const completedTasks = tasks.filter((task) => task.completed);
     const categoryMap = new Map();
+    const taskTitleMap = new Map();
 
     tasks.forEach((task) => {
       const current = categoryMap.get(task.category) ?? { total: 0, completed: 0 };
       categoryMap.set(task.category, {
         total: current.total + 1,
         completed: current.completed + (task.completed ? 1 : 0),
+      });
+
+      const currentTask = taskTitleMap.get(task.title) ?? { total: 0, completed: 0 };
+      taskTitleMap.set(task.title, {
+        total: currentTask.total + 1,
+        completed: currentTask.completed + (task.completed ? 1 : 0),
       });
     });
 
@@ -587,6 +608,16 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       ? []
       : weekdaySeries.filter((day) => day.totalCount > 0 && day.completionRate === lowestWeekdayRate);
 
+    const weakestTask = Array.from(taskTitleMap.entries())
+      .map(([title, value]) => ({
+        title,
+        ...value,
+        completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
+        failureRate: value.total > 0 ? Math.round(((value.total - value.completed) / value.total) * 100) : 0,
+      }))
+      .filter((item) => item.total > 0 && item.completed < item.total)
+      .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total || left.title.localeCompare(right.title, 'ko-KR'))[0] ?? null;
+
     return {
       ...member,
       totalTasks: tasks.length,
@@ -599,6 +630,7 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
       weekdaySeries,
       lowestWeekdays,
+      weakestTask,
     };
   });
 
@@ -668,12 +700,17 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       };
     }
 
-    const lowestWeekdayLabels = member.lowestWeekdays.map((day) => day.label).join(', ');
+    const lowestWeekdayLabels = member.lowestWeekdays
+      .map((day) => getFullWeekdayLabel(getWeekdayValue(day.dateKey)))
+      .join(', ');
+
+    const weakestTaskTitle = member.weakestTask?.title ?? '부족했던 학습';
+    const weakestWeekdayText = lowestWeekdayLabels || '약했던 요일';
 
     return {
       memberId: member.id,
       name: member.name,
-      message: `${weakestTaskLearning?.title ?? '부족했던 학습'}을 먼저 챙기고, ${lowestWeekdayLabels || '약했던 요일'} 흐름을 보완하면 좋겠습니다.`,
+      message: `${weakestTaskTitle}을 먼저 챙기고, ${weakestWeekdayText} 과제를 보완하면 좋겠습니다.`,
     };
   });
 
