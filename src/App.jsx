@@ -73,6 +73,24 @@ function getCurrentWeekDateKeysBeforeToday() {
   return keys;
 }
 
+function getWeeklyReportPublishContext(now = new Date()) {
+  const currentWeekStart = startOfWeek(now);
+  const publishTime = new Date(currentWeekStart);
+  publishTime.setDate(publishTime.getDate() + 6);
+  publishTime.setHours(21, 0, 0, 0);
+
+  const childVisible = now >= publishTime;
+  const publishedWeekStart = childVisible
+    ? currentWeekStart
+    : new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
+
+  return {
+    currentWeekStart,
+    publishedWeekStart,
+    childVisible,
+  };
+}
+
 function todayString() {
   return toLocalDateKey(new Date());
 }
@@ -506,8 +524,8 @@ function buildHistoryGroups(tasks, members) {
   };
 }
 
-function buildWeeklyReport(state) {
-  const weekStart = startOfWeek();
+function buildWeeklyReport(state, weekStartInput = new Date()) {
+  const weekStart = startOfWeek(weekStartInput);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
   const weekDateKeys = Array.from({ length: 7 }, (_, index) => addDays(toLocalDateKey(weekStart), index));
@@ -561,9 +579,13 @@ function buildWeeklyReport(state) {
       };
     });
 
-    const lowestWeekday = [...weekdaySeries]
+    const lowestWeekdayRate = [...weekdaySeries]
       .filter((day) => day.totalCount > 0)
-      .sort((left, right) => left.completionRate - right.completionRate || right.totalCount - left.totalCount)[0] ?? null;
+      .sort((left, right) => left.completionRate - right.completionRate || right.totalCount - left.totalCount)[0]?.completionRate;
+
+    const lowestWeekdays = lowestWeekdayRate === undefined
+      ? []
+      : weekdaySeries.filter((day) => day.totalCount > 0 && day.completionRate === lowestWeekdayRate);
 
     return {
       ...member,
@@ -576,7 +598,7 @@ function buildWeeklyReport(state) {
       repeatedTaskSuccess: tasks.filter((task) => task.fixed && task.completed).length,
       dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
       weekdaySeries,
-      lowestWeekday,
+      lowestWeekdays,
     };
   });
 
@@ -646,10 +668,12 @@ function buildWeeklyReport(state) {
       };
     }
 
+    const lowestWeekdayLabels = member.lowestWeekdays.map((day) => day.label).join(', ');
+
     return {
       memberId: member.id,
       name: member.name,
-      message: `${member.weakCategory !== '-' ? `${member.weakCategory} 학습` : '부족했던 학습'}을 먼저 챙기고, ${member.lowestWeekday?.label ?? '약했던 요일'} 흐름을 보완하면 좋겠습니다.`,
+      message: `${weakestTaskLearning?.title ?? '부족했던 학습'}을 먼저 챙기고, ${lowestWeekdayLabels || '약했던 요일'} 흐름을 보완하면 좋겠습니다.`,
     };
   });
 
@@ -676,13 +700,19 @@ function buildWeeklyReport(state) {
   };
 }
 
-function createTabs(mode) {
+function createTabs(mode, childWeeklyReportVisible = false) {
   if (mode === MODE_CHILD) {
-    return [
+    const tabs = [
       { id: 'dashboard', label: '이번 주 보기' },
       { id: 'tasks', label: '과제' },
       { id: 'rewards', label: '보상' },
     ];
+
+    if (childWeeklyReportVisible) {
+      tabs.push({ id: 'weekly-report', label: '주간 보고서' });
+    }
+
+    return tabs;
   }
 
   return [
@@ -714,6 +744,7 @@ export default function App() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [syncMessage, setSyncMessage] = useState('');
   const hasLoadedRemoteState = useRef(false);
+  const reportContext = useMemo(() => getWeeklyReportPublishContext(new Date()), [state.tasks.length, state.members.length]);
 
   useEffect(() => {
     let active = true;
@@ -842,11 +873,11 @@ export default function App() {
   }, [mode, state.members]);
 
   useEffect(() => {
-    const allowedTabs = createTabs(mode);
+    const allowedTabs = createTabs(mode, reportContext.childVisible);
     if (!allowedTabs.some((item) => item.id === tab)) {
       setTab('dashboard');
     }
-  }, [mode, tab]);
+  }, [mode, reportContext.childVisible, tab]);
 
   const balances = useMemo(() => computeMemberBalances(state), [state]);
   const dashboardMembers = useMemo(
@@ -863,8 +894,10 @@ export default function App() {
   );
   const weekSeries = useMemo(() => buildWeekSeries(dashboardTasks), [dashboardTasks]);
   const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
-  const weeklyReport = useMemo(() => buildWeeklyReport(state), [state]);
-  const tabs = useMemo(() => createTabs(mode), [mode]);
+  const parentWeeklyReport = useMemo(() => buildWeeklyReport(state, reportContext.currentWeekStart), [reportContext.currentWeekStart, state]);
+  const childWeeklyReport = useMemo(() => buildWeeklyReport(state, reportContext.publishedWeekStart), [reportContext.publishedWeekStart, state]);
+  const weeklyReport = mode === MODE_CHILD ? childWeeklyReport : parentWeeklyReport;
+  const tabs = useMemo(() => createTabs(mode, reportContext.childVisible), [mode, reportContext.childVisible]);
   const todayTasks = useMemo(() => dashboardTasks.filter((task) => task.date === todayString()), [dashboardTasks]);
   const editableWeekTasks = useMemo(() => {
     const allowedDateKeys = new Set(getCurrentWeekDateKeysBeforeToday());
@@ -1983,12 +2016,12 @@ export default function App() {
         </main>
       )}
 
-      {tab === 'weekly-report' && mode === MODE_PARENT && (
+      {tab === 'weekly-report' && (mode === MODE_PARENT || (mode === MODE_CHILD && reportContext.childVisible)) && (
         <main className="content-grid">
           <section className="panel">
             <div className="section-head">
               <h2>이번 주 요약</h2>
-              <p>{weeklyReport.label} 기준 보고서입니다.</p>
+              <p>{weeklyReport.label} 기준 보고서입니다. {mode === MODE_PARENT ? '부모 모드에서는 주중에도 미리 볼 수 있습니다.' : '일요일 밤 9시 이후 공개된 주간 보고서입니다.'}</p>
             </div>
             <div className="table-list">
               <div className="table-row">
