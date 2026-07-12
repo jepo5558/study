@@ -580,16 +580,9 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
   const memberStats = state.members.map((member) => {
     const tasks = weekTasks.filter((task) => task.memberId === member.id);
     const completedTasks = tasks.filter((task) => task.completed);
-    const categoryMap = new Map();
     const taskTitleMap = new Map();
 
     tasks.forEach((task) => {
-      const current = categoryMap.get(task.category) ?? { total: 0, completed: 0 };
-      categoryMap.set(task.category, {
-        total: current.total + 1,
-        completed: current.completed + (task.completed ? 1 : 0),
-      });
-
       const currentTask = taskTitleMap.get(task.title) ?? { total: 0, completed: 0 };
       taskTitleMap.set(task.title, {
         total: currentTask.total + 1,
@@ -597,16 +590,20 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       });
     });
 
-    const categories = Array.from(categoryMap.entries()).map(([category, value]) => ({
-      category,
+    const taskSummaries = Array.from(taskTitleMap.entries()).map(([title, value]) => ({
+      title,
       ...value,
       completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
+      failureRate: value.total > 0 ? Math.round(((value.total - value.completed) / value.total) * 100) : 0,
     }));
 
-    const bestCategory = [...categories].sort((left, right) => right.completionRate - left.completionRate || right.completed - left.completed)[0] ?? null;
-    const weakCategory = [...categories]
-      .filter((category) => category.total > 0)
-      .sort((left, right) => left.completionRate - right.completionRate || right.total - left.total)[0] ?? null;
+    const bestTask = [...taskSummaries]
+      .filter((task) => task.completed > 0)
+      .sort((left, right) => right.completionRate - left.completionRate || right.completed - left.completed || left.title.localeCompare(right.title, 'ko-KR'))[0] ?? null;
+
+    const weakTask = [...taskSummaries]
+      .filter((task) => task.total > 0 && task.completed < task.total)
+      .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total || left.title.localeCompare(right.title, 'ko-KR'))[0] ?? null;
 
     const weekdaySeries = weekDateKeys.map((dateKey) => {
       const dayTasks = tasks.filter((task) => task.date === dateKey);
@@ -645,8 +642,8 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       completedTasks: completedTasks.length,
       completionRate: tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0,
       earnedPoints: completedTasks.reduce((sum, task) => sum + Number(task.points || 0), 0),
-      bestCategory: bestCategory?.category ?? '-',
-      weakCategory: weakCategory?.category ?? '-',
+      bestTaskTitle: bestTask?.title ?? '-',
+      weakTaskTitle: weakTask?.title ?? '-',
       repeatedTaskSuccess: tasks.filter((task) => task.fixed && task.completed).length,
       dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
       weekdaySeries,
@@ -2222,8 +2219,8 @@ export default function App() {
                       </div>
                     </div>
                     <div className="report-insight">
-                      <small>잘한 항목: {member.bestCategory}</small>
-                      <small>보완할 항목: {member.weakCategory}</small>
+                      <small>잘한 학습: {member.bestTaskTitle}</small>
+                      <small>보완할 학습: {member.weakTaskTitle}</small>
                     </div>
                     <div className="mini-week-chart">
                       {member.weekdaySeries.map((day) => (
