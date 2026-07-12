@@ -506,6 +506,105 @@ function buildHistoryGroups(tasks, members) {
   };
 }
 
+function buildWeeklyReport(state) {
+  const weekStart = startOfWeek();
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+
+  const weekTasks = state.tasks.filter((task) => {
+    const taskDate = parseDateValue(task.date);
+    return taskDate >= weekStart && taskDate < weekEnd;
+  });
+
+  const summary = {
+    totalTasks: weekTasks.length,
+    completedTasks: weekTasks.filter((task) => task.completed).length,
+    completionRate: weekTasks.length > 0 ? Math.round((weekTasks.filter((task) => task.completed).length / weekTasks.length) * 100) : 0,
+    earnedPoints: weekTasks.filter((task) => task.completed).reduce((sum, task) => sum + Number(task.points || 0), 0),
+  };
+
+  const memberStats = state.members.map((member) => {
+    const tasks = weekTasks.filter((task) => task.memberId === member.id);
+    const completedTasks = tasks.filter((task) => task.completed);
+    const categoryMap = new Map();
+
+    tasks.forEach((task) => {
+      const current = categoryMap.get(task.category) ?? { total: 0, completed: 0 };
+      categoryMap.set(task.category, {
+        total: current.total + 1,
+        completed: current.completed + (task.completed ? 1 : 0),
+      });
+    });
+
+    const categories = Array.from(categoryMap.entries()).map(([category, value]) => ({
+      category,
+      ...value,
+    }));
+
+    const bestCategory = categories.sort((left, right) => right.completed - left.completed || right.total - left.total)[0] ?? null;
+
+    return {
+      ...member,
+      totalTasks: tasks.length,
+      completedTasks: completedTasks.length,
+      completionRate: tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0,
+      earnedPoints: completedTasks.reduce((sum, task) => sum + Number(task.points || 0), 0),
+      bestCategory: bestCategory?.category ?? '-',
+      repeatedTaskSuccess: tasks.filter((task) => task.fixed && task.completed).length,
+      dailyHits: Array.from(new Set(completedTasks.map((task) => task.date))).length,
+    };
+  });
+
+  const mvp = [...memberStats].sort((left, right) => right.earnedPoints - left.earnedPoints || right.completionRate - left.completionRate)[0] ?? null;
+  const steadyWinner = [...memberStats].sort((left, right) => right.dailyHits - left.dailyHits || right.completionRate - left.completionRate)[0] ?? null;
+  const routineWinner = [...memberStats].sort((left, right) => right.repeatedTaskSuccess - left.repeatedTaskSuccess || right.completionRate - left.completionRate)[0] ?? null;
+
+  const weekSeries = buildWeekSeries(weekTasks);
+  const bestDay = [...weekSeries].sort((left, right) => right.completionRate - left.completionRate || right.completedCount - left.completedCount)[0] ?? null;
+
+  const categoryMap = new Map();
+  weekTasks.forEach((task) => {
+    const current = categoryMap.get(task.category) ?? { total: 0, completed: 0, points: 0 };
+    categoryMap.set(task.category, {
+      total: current.total + 1,
+      completed: current.completed + (task.completed ? 1 : 0),
+      points: current.points + (task.completed ? Number(task.points || 0) : 0),
+    });
+  });
+
+  const categorySummary = Array.from(categoryMap.entries())
+    .map(([category, value]) => ({
+      category,
+      ...value,
+      completionRate: value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0,
+    }))
+    .sort((left, right) => right.completed - left.completed || right.points - left.points);
+
+  const nextAction =
+    summary.totalTasks === 0
+      ? '다음 주에는 먼저 반복 과제를 등록해서 흐름을 만드는 것이 좋습니다.'
+      : summary.completionRate >= 80
+        ? '지금 흐름이면 다음 주에는 점수가 높은 과제를 한두 개 더 추가해도 됩니다.'
+        : summary.completionRate >= 50
+          ? '완료율이 중간권입니다. 가장 많이 남는 카테고리를 줄이면 바로 좋아집니다.'
+          : '이번 주에는 미완료 과제가 많았습니다. 다음 주에는 과제 수를 조금 줄여서 시작하는 편이 좋습니다.';
+
+  return {
+    label: `${formatDate(weekStart)} - ${formatDate(addDays(toLocalDateKey(weekStart), 6))}`,
+    summary,
+    memberStats,
+    weekSeries,
+    categorySummary,
+    awards: {
+      mvp,
+      steadyWinner,
+      routineWinner,
+      bestDay,
+    },
+    nextAction,
+  };
+}
+
 function createTabs(mode) {
   if (mode === MODE_CHILD) {
     return [
@@ -518,6 +617,7 @@ function createTabs(mode) {
   return [
     { id: 'dashboard', label: '대시보드' },
     { id: 'tasks', label: '과제' },
+    { id: 'weekly-report', label: '주간 보고서' },
     { id: 'history', label: '기록 조회' },
     { id: 'rewards', label: '보상' },
     { id: 'messages', label: '응원' },
@@ -692,6 +792,7 @@ export default function App() {
   );
   const weekSeries = useMemo(() => buildWeekSeries(dashboardTasks), [dashboardTasks]);
   const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
+  const weeklyReport = useMemo(() => buildWeeklyReport(state), [state]);
   const tabs = useMemo(() => createTabs(mode), [mode]);
   const todayTasks = useMemo(() => dashboardTasks.filter((task) => task.date === todayString()), [dashboardTasks]);
   const editableWeekTasks = useMemo(() => {
@@ -1803,6 +1904,113 @@ export default function App() {
                         {task.completed ? '완료' : '대기'} · {task.memberName} · {task.title} · {task.category}
                       </small>
                     ))}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </main>
+      )}
+
+      {tab === 'weekly-report' && mode === MODE_PARENT && (
+        <main className="content-grid">
+          <section className="panel">
+            <div className="section-head">
+              <h2>이번 주 요약</h2>
+              <p>{weeklyReport.label} 기준 보고서입니다.</p>
+            </div>
+            <div className="table-list">
+              <div className="table-row">
+                <strong>완료율</strong>
+                <div className="row-stats">
+                  <span>{weeklyReport.summary.completionRate}%</span>
+                  <span>{weeklyReport.summary.completedTasks}/{weeklyReport.summary.totalTasks}개</span>
+                </div>
+              </div>
+              <div className="table-row">
+                <strong>획득 점수</strong>
+                <div className="row-stats">
+                  <span>{weeklyReport.summary.earnedPoints}점</span>
+                </div>
+              </div>
+              <div className="table-row">
+                <strong>다음 주 포인트</strong>
+                <div className="row-stats">
+                  <span>{weeklyReport.nextAction}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="section-head">
+              <h2>이번 주 시상식</h2>
+              <p>재미 요소를 섞은 자동 요약입니다.</p>
+            </div>
+            <div className="mini-list">
+              <div className="message-row">
+                <strong>MVP</strong>
+                <small>{weeklyReport.awards.mvp ? `${weeklyReport.awards.mvp.name} · ${weeklyReport.awards.mvp.earnedPoints}점 · 완료율 ${weeklyReport.awards.mvp.completionRate}%` : '데이터 없음'}</small>
+              </div>
+              <div className="message-row">
+                <strong>성실왕</strong>
+                <small>{weeklyReport.awards.steadyWinner ? `${weeklyReport.awards.steadyWinner.name} · ${weeklyReport.awards.steadyWinner.dailyHits}일 달성` : '데이터 없음'}</small>
+              </div>
+              <div className="message-row">
+                <strong>루틴왕</strong>
+                <small>{weeklyReport.awards.routineWinner ? `${weeklyReport.awards.routineWinner.name} · 반복 과제 ${weeklyReport.awards.routineWinner.repeatedTaskSuccess}회 완료` : '데이터 없음'}</small>
+              </div>
+              <div className="message-row">
+                <strong>최고의 하루</strong>
+                <small>{weeklyReport.awards.bestDay ? `${weeklyReport.awards.bestDay.label} · 완료율 ${weeklyReport.awards.bestDay.completionRate}%` : '데이터 없음'}</small>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="section-head">
+              <h2>구성원별 성적표</h2>
+              <p>각 구성원의 이번 주 흐름입니다.</p>
+            </div>
+            <div className="mini-list">
+              {weeklyReport.memberStats.length === 0 ? (
+                <div className="empty-state">등록된 구성원이 없습니다.</div>
+              ) : (
+                weeklyReport.memberStats.map((member) => (
+                  <div key={member.id} className="table-row">
+                    <div>
+                      <strong>{member.name}</strong>
+                      <p>{member.role === MODE_PARENT ? '부모' : '아이'}</p>
+                    </div>
+                    <div className="row-stats">
+                      <span>완료율 {member.completionRate}%</span>
+                      <span>{member.completedTasks}/{member.totalTasks}개</span>
+                      <span>{member.earnedPoints}점</span>
+                      <span>강점 {member.bestCategory}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="section-head">
+              <h2>카테고리 분석</h2>
+              <p>무엇을 가장 많이 해냈는지 봅니다.</p>
+            </div>
+            <div className="mini-list">
+              {weeklyReport.categorySummary.length === 0 ? (
+                <div className="empty-state">이번 주 카테고리 데이터가 없습니다.</div>
+              ) : (
+                weeklyReport.categorySummary.map((category) => (
+                  <div key={category.category} className="table-row">
+                    <strong>{category.category}</strong>
+                    <div className="row-stats">
+                      <span>완료율 {category.completionRate}%</span>
+                      <span>{category.completed}/{category.total}개</span>
+                      <span>{category.points}점</span>
+                    </div>
                   </div>
                 ))
               )}
