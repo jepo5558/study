@@ -627,14 +627,19 @@ function buildWeeklyReport(state) {
     .filter((item) => item.total > 0)
     .sort((left, right) => right.failureRate - left.failureRate || right.total - left.total)[0] ?? null;
 
+  const lowestWeekday = [...weekSeries]
+    .filter((day) => day.totalCount > 0)
+    .sort((left, right) => left.completionRate - right.completionRate || right.totalCount - left.totalCount)[0] ?? null;
+
+  const memberPointSummary = memberStats
+    .filter((member) => member.totalTasks > 0)
+    .map((member) => `${member.name} ${member.earnedPoints}점`)
+    .join(' · ');
+
   const nextAction =
     summary.totalTasks === 0
       ? '다음 주에는 먼저 반복 과제를 등록해서 흐름을 만드는 것이 좋습니다.'
-      : summary.completionRate >= 80
-        ? '지금 흐름이면 다음 주에는 점수가 높은 과제를 한두 개 더 추가해도 됩니다.'
-        : summary.completionRate >= 50
-          ? '완료율이 중간권입니다. 가장 많이 남는 카테고리를 줄이면 바로 좋아집니다.'
-          : '이번 주에는 미완료 과제가 많았습니다. 다음 주에는 과제 수를 조금 줄여서 시작하는 편이 좋습니다.';
+      : `다음 주에는 ${weakestTaskLearning?.title ?? '부족했던 학습'}을 먼저 챙기고, ${lowestWeekday?.label ?? '완료율이 낮았던 요일'} 흐름을 보완하는 것이 좋습니다.`;
 
   return {
     label: `${formatDate(weekStart)} - ${formatDate(addDays(toLocalDateKey(weekStart), 6))}`,
@@ -653,6 +658,8 @@ function buildWeeklyReport(state) {
       weakLearning,
       bestTaskLearning,
       weakestTaskLearning,
+      lowestWeekday,
+      memberPointSummary,
     },
     nextAction,
   };
@@ -1984,6 +1991,7 @@ export default function App() {
                 <strong>획득 점수</strong>
                 <div className="row-stats">
                   <span>{weeklyReport.summary.earnedPoints}점</span>
+                  <span>{weeklyReport.learningInsights.memberPointSummary || '참여자 데이터 없음'}</span>
                 </div>
               </div>
               <div className="table-row">
