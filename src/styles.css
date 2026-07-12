@@ -27,7 +27,7 @@ button {
 .app-shell {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px 24px 40px;
 }
 
 .topbar {
@@ -35,7 +35,7 @@ button {
   justify-content: space-between;
   align-items: end;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .eyebrow {
@@ -51,7 +51,8 @@ p {
 }
 
 h1 {
-  font-size: 32px;
+  font-size: 34px;
+  line-height: 1.1;
 }
 
 .topbar-actions {
@@ -62,16 +63,17 @@ h1 {
 .hero-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 
 .hero-card,
 .panel {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 18px;
+  border: 1px solid #dbe2ea;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .metric-label,
@@ -87,8 +89,9 @@ h1 {
 
 .metric-value {
   display: block;
-  margin: 8px 0;
+  margin: 10px 0 12px;
   font-size: 34px;
+  line-height: 1.1;
 }
 
 .progress-track {
@@ -151,7 +154,7 @@ h1 {
 .content-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .panel {
@@ -159,12 +162,22 @@ h1 {
 }
 
 .panel .section-head {
-  margin-bottom: 14px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
 }
 
 .section-head h2 {
-  font-size: 18px;
-  margin-bottom: 6px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.section-head p {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 72ch;
 }
 
 .week-chart {
@@ -203,9 +216,15 @@ h1 {
 .nudge-box {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
-  padding: 14px;
-  border-radius: 10px;
-  margin-bottom: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.nudge-box strong {
+  display: block;
+  font-size: 18px;
+  line-height: 1.5;
 }
 
 .mini-list,
@@ -214,16 +233,21 @@ h1 {
 .message-list,
 .member-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.table-list {
+  display: grid;
+  gap: 12px;
 }
 
 .report-card {
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
   background: #fff;
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .report-insight {
@@ -277,9 +301,9 @@ h1 {
 .message-row,
 .member-row,
 .table-row {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 12px;
+  border: 1px solid #e8edf3;
+  border-radius: 12px;
+  padding: 14px;
   background: #fff;
 }
 
@@ -291,7 +315,45 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: center;
+  align-items: flex-start;
+}
+
+.mini-row strong,
+.table-row strong,
+.reward-row strong,
+.member-row strong,
+.message-row strong,
+.task-row strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.mini-row small,
+.table-row small,
+.reward-row small,
+.member-row small,
+.message-row small,
+.task-row small,
+.task-meta small,
+.report-insight small {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-row > strong,
+.table-row > strong {
+  flex: 0 0 132px;
+  color: #0f172a;
+}
+
+.message-row > small,
+.table-row > div,
+.table-row > .row-stats,
+.table-row > .summary-stats {
+  flex: 1;
+  min-width: 0;
 }
 
 .row-stats,
@@ -301,8 +363,25 @@ h1 {
   flex-wrap: wrap;
 }
 
+.row-stats {
+  justify-content: flex-end;
+}
+
+.row-stats span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1;
+}
+
 .summary-stats {
-  min-width: 96px;
+  min-width: 104px;
   display: grid;
   gap: 4px;
   justify-items: end;
@@ -400,8 +479,8 @@ select {
 .task-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  align-items: center;
+  gap: 14px;
+  align-items: flex-start;
 }
 
 .task-row.done {
@@ -413,6 +492,11 @@ select {
   display: flex;
   gap: 10px;
   align-items: start;
+  flex: 1;
+}
+
+.task-meta {
+  flex: 1;
 }
 
 .task-check span,
@@ -421,14 +505,15 @@ select {
 .message-row,
 .member-row {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
 .empty-state {
-  padding: 20px;
+  padding: 22px;
   border: 1px dashed #d1d5db;
-  border-radius: 10px;
+  border-radius: 12px;
   color: #6b7280;
+  line-height: 1.6;
 }
 
 @media (max-width: 960px) {
