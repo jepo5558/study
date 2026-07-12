@@ -75,14 +75,19 @@ function getCurrentWeekDateKeysBeforeToday() {
 
 function getWeeklyReportPublishContext(now = new Date()) {
   const currentWeekStart = startOfWeek(now);
-  const publishTime = new Date(currentWeekStart);
-  publishTime.setDate(publishTime.getDate() + 6);
-  publishTime.setHours(21, 0, 0, 0);
+  const currentWeekPublishTime = new Date(currentWeekStart);
+  currentWeekPublishTime.setDate(currentWeekPublishTime.getDate() + 6);
+  currentWeekPublishTime.setHours(21, 0, 0, 0);
 
-  const childVisible = now >= publishTime;
-  const publishedWeekStart = childVisible
-    ? currentWeekStart
-    : new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
+  const previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+
+  const previousWeekPublishTime = new Date(previousWeekStart);
+  previousWeekPublishTime.setDate(previousWeekPublishTime.getDate() + 6);
+  previousWeekPublishTime.setHours(21, 0, 0, 0);
+
+  const childVisible = now >= previousWeekPublishTime;
+  const publishedWeekStart = now >= currentWeekPublishTime ? currentWeekStart : previousWeekStart;
 
   return {
     currentWeekStart,
