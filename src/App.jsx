@@ -91,6 +91,15 @@ function getWeeklyReportPublishContext(now = new Date()) {
   };
 }
 
+function isChildWeeklyReportPreviewEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const source = `${window.location.search}${window.location.hash}`.toLowerCase();
+  return source.includes('preview-weekly-report=1');
+}
+
 function todayString() {
   return toLocalDateKey(new Date());
 }
@@ -850,7 +859,17 @@ export default function App() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [syncMessage, setSyncMessage] = useState('');
   const hasLoadedRemoteState = useRef(false);
-  const reportContext = useMemo(() => getWeeklyReportPublishContext(new Date()), [state.tasks.length, state.members.length]);
+  const reportContext = useMemo(() => {
+    const baseContext = getWeeklyReportPublishContext(new Date());
+    if (mode === MODE_CHILD && isChildWeeklyReportPreviewEnabled()) {
+      return {
+        ...baseContext,
+        childVisible: true,
+      };
+    }
+
+    return baseContext;
+  }, [mode, state.tasks.length, state.members.length]);
 
   useEffect(() => {
     let active = true;
