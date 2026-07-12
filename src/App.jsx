@@ -1981,7 +1981,7 @@ export default function App() {
                 <strong>MVP</strong>
                 <small>
                   {weeklyReport.awards.mvpRank[0]
-                    ? `1위 ${weeklyReport.awards.mvpRank[0].name} · ${weeklyReport.awards.mvpRank[0].earnedPoints}점 / 2위 ${weeklyReport.awards.mvpRank[1]?.name ?? '-'}`
+                    ? `1위 ${weeklyReport.awards.mvpRank[0].name} · ${weeklyReport.awards.mvpRank[0].earnedPoints}점 · 완료율 ${weeklyReport.awards.mvpRank[0].completionRate}% / 2위 ${weeklyReport.awards.mvpRank[1] ? `${weeklyReport.awards.mvpRank[1].name} · ${weeklyReport.awards.mvpRank[1].earnedPoints}점 · 완료율 ${weeklyReport.awards.mvpRank[1].completionRate}%` : '-'}`
                     : '데이터 없음'}
                 </small>
               </div>
@@ -1989,7 +1989,7 @@ export default function App() {
                 <strong>성실왕</strong>
                 <small>
                   {weeklyReport.awards.steadyRank[0]
-                    ? `1위 ${weeklyReport.awards.steadyRank[0].name} · ${weeklyReport.awards.steadyRank[0].dailyHits}일 / 2위 ${weeklyReport.awards.steadyRank[1]?.name ?? '-'}`
+                    ? `1위 ${weeklyReport.awards.steadyRank[0].name} · ${weeklyReport.awards.steadyRank[0].dailyHits}일 · 완료율 ${weeklyReport.awards.steadyRank[0].completionRate}% / 2위 ${weeklyReport.awards.steadyRank[1] ? `${weeklyReport.awards.steadyRank[1].name} · ${weeklyReport.awards.steadyRank[1].dailyHits}일 · 완료율 ${weeklyReport.awards.steadyRank[1].completionRate}%` : '-'}`
                     : '데이터 없음'}
                 </small>
               </div>
@@ -1997,7 +1997,7 @@ export default function App() {
                 <strong>루틴왕</strong>
                 <small>
                   {weeklyReport.awards.routineRank[0]
-                    ? `1위 ${weeklyReport.awards.routineRank[0].name} · ${weeklyReport.awards.routineRank[0].repeatedTaskSuccess}회 / 2위 ${weeklyReport.awards.routineRank[1]?.name ?? '-'}`
+                    ? `1위 ${weeklyReport.awards.routineRank[0].name} · ${weeklyReport.awards.routineRank[0].repeatedTaskSuccess}회 · 완료율 ${weeklyReport.awards.routineRank[0].completionRate}% / 2위 ${weeklyReport.awards.routineRank[1] ? `${weeklyReport.awards.routineRank[1].name} · ${weeklyReport.awards.routineRank[1].repeatedTaskSuccess}회 · 완료율 ${weeklyReport.awards.routineRank[1].completionRate}%` : '-'}`
                     : '데이터 없음'}
                 </small>
               </div>
