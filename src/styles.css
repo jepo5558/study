@@ -236,9 +236,18 @@ h1 {
   gap: 12px;
 }
 
+.restore-group {
+  display: grid;
+  gap: 10px;
+}
+
 .table-list {
   display: grid;
   gap: 12px;
+}
+
+.compact-head {
+  margin-top: 24px;
 }
 
 .report-card {

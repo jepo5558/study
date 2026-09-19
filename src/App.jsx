@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './supabase';
+import { buildEditedRecurringTasks, buildSeriesAsSingleTasks } from './taskLogic';
 
 const STORAGE_KEY = 'study_project_state_v1';
 const PARENT_AUTH_KEY = 'study_parent_auth_v1';
@@ -7,6 +8,9 @@ const MODE_CHILD = 'child';
 const MODE_PARENT = 'parent';
 const PARENT_PASSWORD = '159qwert';
 const APP_STATE_ROW_ID = 'primary';
+const DEFAULT_REPEAT_WEEKS = 52;
+const MAX_REPEAT_WEEKS = 52;
+const MANUAL_POINT_SERIES_ID = 'manual-point-adjustment';
 const WEEKDAY_OPTIONS = [
   { value: 1, label: '월' },
   { value: 2, label: '화' },
@@ -59,9 +63,9 @@ function normalizeDateKey(value) {
   return toLocalDateKey(parsed);
 }
 
-function getCurrentWeekDateKeysBeforeToday() {
-  const weekStart = startOfWeek();
-  const todayKey = todayString();
+function getCurrentWeekDateKeysBeforeToday(now = new Date()) {
+  const weekStart = startOfWeek(now);
+  const todayKey = todayString(now);
   const keys = [];
   const cursor = new Date(weekStart);
 
@@ -96,8 +100,8 @@ function getWeeklyReportPublishContext(now = new Date()) {
   };
 }
 
-function todayString() {
-  return toLocalDateKey(new Date());
+function todayString(now = new Date()) {
+  return toLocalDateKey(now);
 }
 
 function parseModeFromLocation() {
@@ -251,10 +255,126 @@ function sanitizeImportedState(raw) {
   };
 }
 
-async function fetchRemoteState() {
+function serializeState(state) {
+  return JSON.stringify(sanitizeImportedState(state));
+}
+
+function stateToRemoteRows(state) {
+  const normalized = sanitizeImportedState(state);
+  const timestamp = new Date().toISOString();
+
+  return {
+    members: normalized.members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: member.role,
+      updated_at: timestamp,
+    })),
+    tasks: normalized.tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      member_id: task.memberId,
+      date: task.date,
+      points: Number(task.points || 0),
+      category: task.category || '기타',
+      fixed: Boolean(task.fixed),
+      series_id: task.seriesId || '',
+      repeat_days: Array.isArray(task.repeatDays) ? task.repeatDays : [],
+      completed: Boolean(task.completed),
+      completed_at: task.completedAt || null,
+      updated_at: timestamp,
+    })),
+    rewards: normalized.rewards.map((reward) => ({
+      id: reward.id,
+      title: reward.title,
+      member_id: reward.memberId,
+      points_required: Number(reward.pointsRequired || 0),
+      status: reward.status,
+      updated_at: reward.updatedAt || timestamp,
+    })),
+    cheers: normalized.cheers.map((cheer) => ({
+      id: cheer.id,
+      message: cheer.message,
+      created_at: cheer.createdAt || timestamp,
+      updated_at: timestamp,
+    })),
+  };
+}
+
+function remoteRowsToState({ members, tasks, rewards, cheers }) {
+  return sanitizeImportedState({
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: member.role,
+    })),
+    tasks: tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      memberId: task.member_id,
+      date: task.date,
+      points: task.points,
+      category: task.category,
+      fixed: task.fixed,
+      seriesId: task.series_id,
+      repeatDays: Array.isArray(task.repeat_days) ? task.repeat_days : [],
+      completed: task.completed,
+      completedAt: task.completed_at ?? '',
+    })),
+    rewards: rewards.map((reward) => ({
+      id: reward.id,
+      title: reward.title,
+      memberId: reward.member_id,
+      pointsRequired: reward.points_required,
+      status: reward.status,
+      updatedAt: reward.updated_at ?? new Date().toISOString(),
+    })),
+    cheers: cheers.map((cheer) => ({
+      id: cheer.id,
+      message: cheer.message,
+      createdAt: cheer.created_at ?? new Date().toISOString(),
+    })),
+  });
+}
+
+function buildCollectionDiff(currentItems, previousItems, toComparableRow) {
+  const currentMap = new Map(currentItems.map((item) => [item.id, item]));
+  const previousMap = new Map(previousItems.map((item) => [item.id, item]));
+  const upserts = [];
+  const deletes = [];
+
+  currentMap.forEach((item, id) => {
+    const previousItem = previousMap.get(id);
+    if (!previousItem || JSON.stringify(toComparableRow(item)) !== JSON.stringify(toComparableRow(previousItem))) {
+      upserts.push(item);
+    }
+  });
+
+  previousMap.forEach((item, id) => {
+    if (!currentMap.has(id)) {
+      deletes.push(item);
+    }
+  });
+
+  return { upserts, deletes };
+}
+
+function isStructuredSyncSchemaError(error) {
+  const message = String(error?.message ?? '');
+  return (
+    message.includes('relation') ||
+    message.includes('does not exist') ||
+    message.includes('members') ||
+    message.includes('tasks') ||
+    message.includes('rewards') ||
+    message.includes('cheers')
+  );
+}
+
+async function fetchLegacyRemoteState() {
   const { data, error } = await supabase
     .from('app_state')
-    .select('data')
+    .select('data, updated_at')
     .eq('id', APP_STATE_ROW_ID)
     .maybeSingle();
 
@@ -262,24 +382,165 @@ async function fetchRemoteState() {
     throw error;
   }
 
-  return data?.data ?? null;
+  return {
+    state: data?.data ?? null,
+    updatedAt: data?.updated_at ?? '',
+  };
 }
 
-async function saveRemoteState(state) {
-  const { error } = await supabase.from('app_state').upsert(
-    {
-      id: APP_STATE_ROW_ID,
-      data: state,
-      updated_at: new Date().toISOString(),
-    },
-    {
-      onConflict: 'id',
-    },
-  );
+async function fetchAllRows(createQuery) {
+  const pageSize = 1000;
+  const rows = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await createQuery().range(from, from + pageSize - 1);
+    if (error) {
+      throw error;
+    }
+
+    rows.push(...(data ?? []));
+
+    if (!data || data.length < pageSize) {
+      return rows;
+    }
+  }
+}
+
+async function fetchRemoteState() {
+  try {
+    const [members, tasks, rewards, cheers] = await Promise.all([
+      fetchAllRows(() => supabase.from('members').select('id, name, role, updated_at').order('name')),
+      fetchAllRows(() =>
+        supabase
+          .from('tasks')
+          .select('id, title, member_id, date, points, category, fixed, series_id, repeat_days, completed, completed_at, updated_at')
+          .order('date', { ascending: true })
+          .order('id', { ascending: true }),
+      ),
+      fetchAllRows(() =>
+        supabase.from('rewards').select('id, title, member_id, points_required, status, updated_at').order('updated_at', { ascending: false }),
+      ),
+      fetchAllRows(() => supabase.from('cheers').select('id, message, created_at, updated_at').order('created_at', { ascending: false })),
+    ]);
+
+    return remoteRowsToState({
+      members,
+      tasks,
+      rewards,
+      cheers,
+    });
+  } catch (error) {
+    if (!isStructuredSyncSchemaError(error)) {
+      throw error;
+    }
+
+    const legacySnapshot = await fetchLegacyRemoteState();
+    return sanitizeImportedState(legacySnapshot.state ?? cloneDefaultState());
+  }
+}
+
+async function upsertRows(table, rows) {
+  if (!rows.length) {
+    return;
+  }
+
+  const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+  if (error) {
+    throw error;
+  }
+}
+
+async function deleteRows(table, ids) {
+  if (!ids.length) {
+    return;
+  }
+
+  const { error } = await supabase.from(table).delete().in('id', ids);
+  if (error) {
+    throw error;
+  }
+}
+
+async function syncRemoteState(nextState, previousState) {
+  try {
+    const nextRows = stateToRemoteRows(nextState);
+    const previousRows = stateToRemoteRows(previousState);
+
+    const memberDiff = buildCollectionDiff(nextRows.members, previousRows.members, (item) => ({
+      id: item.id,
+      name: item.name,
+      role: item.role,
+    }));
+    const taskDiff = buildCollectionDiff(nextRows.tasks, previousRows.tasks, (item) => ({
+      id: item.id,
+      title: item.title,
+      member_id: item.member_id,
+      date: item.date,
+      points: item.points,
+      category: item.category,
+      fixed: item.fixed,
+      series_id: item.series_id,
+      repeat_days: item.repeat_days,
+      completed: item.completed,
+      completed_at: item.completed_at,
+    }));
+    const rewardDiff = buildCollectionDiff(nextRows.rewards, previousRows.rewards, (item) => ({
+      id: item.id,
+      title: item.title,
+      member_id: item.member_id,
+      points_required: item.points_required,
+      status: item.status,
+    }));
+    const cheerDiff = buildCollectionDiff(nextRows.cheers, previousRows.cheers, (item) => ({
+      id: item.id,
+      message: item.message,
+      created_at: item.created_at,
+    }));
+
+    await upsertRows('members', memberDiff.upserts);
+    await upsertRows('tasks', taskDiff.upserts);
+    await upsertRows('rewards', rewardDiff.upserts);
+    await upsertRows('cheers', cheerDiff.upserts);
+
+    await deleteRows('tasks', taskDiff.deletes.map((item) => item.id));
+    await deleteRows('rewards', rewardDiff.deletes.map((item) => item.id));
+    await deleteRows('cheers', cheerDiff.deletes.map((item) => item.id));
+    await deleteRows('members', memberDiff.deletes.map((item) => item.id));
+  } catch (error) {
+    if (!isStructuredSyncSchemaError(error)) {
+      throw error;
+    }
+
+    await saveLegacyRemoteState(nextState);
+  }
+}
+
+async function replaceRemoteState(nextState) {
+  const currentRemoteState = await fetchRemoteState();
+  await syncRemoteState(nextState, currentRemoteState);
+}
+
+async function saveLegacyRemoteState(state) {
+  const { data, error } = await supabase
+    .from('app_state')
+    .upsert(
+      {
+        id: APP_STATE_ROW_ID,
+        data: state,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'id',
+      },
+    )
+    .select('updated_at')
+    .single();
 
   if (error) {
     throw error;
   }
+
+  return data?.updated_at ?? '';
 }
 
 function startOfWeek(date = new Date()) {
@@ -384,9 +645,18 @@ function normalizeWeekdays(selectedWeekdays, dateString) {
   return [getWeekdayValue(dateString)];
 }
 
+function clampRepeatWeeks(repeatWeeks) {
+  const parsed = repeatWeeks === '' || repeatWeeks == null ? DEFAULT_REPEAT_WEEKS : Number(repeatWeeks);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_REPEAT_WEEKS;
+  }
+
+  return Math.min(MAX_REPEAT_WEEKS, Math.max(1, Math.trunc(parsed)));
+}
+
 function buildRecurringTaskDates(startDate, selectedWeekdays, repeatWeeks) {
   const normalizedWeekdays = normalizeWeekdays(selectedWeekdays, startDate);
-  const totalDays = Math.max(1, Number(repeatWeeks || 1)) * 7;
+  const totalDays = clampRepeatWeeks(repeatWeeks) * 7;
   const dates = [];
 
   for (let offset = 0; offset < totalDays; offset += 1) {
@@ -412,6 +682,19 @@ function getRepeatWeeksFromTasks(tasks) {
   return Math.max(1, Math.ceil((diffDays + 1) / 7));
 }
 
+function preserveCompletedTaskScoring(previousTask) {
+  if (!previousTask?.completed) {
+    return {};
+  }
+
+  return {
+    title: previousTask.title,
+    memberId: previousTask.memberId,
+    points: Number(previousTask.points || 0),
+    category: previousTask.category,
+  };
+}
+
 function createEmptyTaskForm(members) {
   return {
     title: '',
@@ -421,7 +704,7 @@ function createEmptyTaskForm(members) {
     category: '학습',
     fixed: false,
     selectedWeekdays: [],
-    repeatWeeks: 8,
+    repeatWeeks: '',
   };
 }
 
@@ -433,8 +716,20 @@ function createEmptyRewardForm(members) {
   };
 }
 
-function computeMemberBalances(state) {
-  const weekStart = startOfWeek();
+function createEmptyPointAdjustmentForm(members) {
+  return {
+    memberId: members.find((member) => member.role === MODE_CHILD)?.id ?? '',
+    points: '',
+    reason: '',
+  };
+}
+
+function isManualPointAdjustment(task) {
+  return task.seriesId === MANUAL_POINT_SERIES_ID;
+}
+
+function computeMemberBalances(state, now = new Date()) {
+  const weekStart = startOfWeek(now);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
 
@@ -456,17 +751,22 @@ function computeMemberBalances(state) {
       return taskDate >= weekStart && taskDate < weekEnd;
     });
 
+    const weeklyEarnedPoints = weeklyTasks
+      .filter((task) => task.completed)
+      .reduce((sum, task) => sum + Number(task.points || 0), 0);
+
     return {
       ...member,
       balance: earned - spent,
-      completedTasks: weeklyTasks.filter((task) => task.completed).length,
-      totalTasks: weeklyTasks.length,
+      weeklyEarnedPoints,
+      completedTasks: weeklyTasks.filter((task) => !isManualPointAdjustment(task) && task.completed).length,
+      totalTasks: weeklyTasks.filter((task) => !isManualPointAdjustment(task)).length,
     };
   });
 }
 
-function buildWeekSeries(tasks) {
-  const base = startOfWeek();
+function buildWeekSeries(tasks, now = new Date()) {
+  const base = startOfWeek(now);
 
   return Array.from({ length: 7 }, (_, index) => {
     const current = new Date(base);
@@ -513,8 +813,7 @@ function getSuggestedNudge(tasks) {
   return `${unfinished.length}개의 과제가 남아 있습니다. 짧은 과제부터 처리하면 좋습니다.`;
 }
 
-function buildHistoryGroups(tasks, members) {
-  const now = new Date();
+function buildHistoryGroups(tasks, members, now = new Date()) {
   const weekStart = startOfWeek(now);
   const monthStart = startOfMonth(now);
 
@@ -562,6 +861,36 @@ function buildHistoryGroups(tasks, members) {
       groups: groupByDate(monthTasks),
     },
   };
+}
+
+function buildRestorableHistoryGroups(tasks, members, now = new Date()) {
+  const todayKey = todayString(now);
+  const grouped = new Map();
+
+  tasks
+    .filter((task) => task.date < todayKey)
+    .sort((left, right) => right.date.localeCompare(left.date) || left.title.localeCompare(right.title, 'ko-KR'))
+    .forEach((task) => {
+      if (!grouped.has(task.date)) {
+        grouped.set(task.date, []);
+      }
+
+      grouped.get(task.date).push({
+        ...task,
+        memberName: getMemberName(members, task.memberId),
+      });
+    });
+
+  return Array.from(grouped.entries()).map(([date, dayTasks]) => ({
+    date,
+    label: formatDate(date),
+    summary: {
+      total: dayTasks.length,
+      completed: dayTasks.filter((task) => task.completed).length,
+      points: dayTasks.filter((task) => task.completed).reduce((sum, task) => sum + Number(task.points || 0), 0),
+    },
+    tasks: dayTasks,
+  }));
 }
 
 function buildWeeklyReport(state, weekStartInput = new Date()) {
@@ -660,6 +989,15 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
   const mvpRank = [...memberStats].sort((left, right) => right.earnedPoints - left.earnedPoints || right.completionRate - left.completionRate).slice(0, 2);
   const steadyRank = [...memberStats].sort((left, right) => right.dailyHits - left.dailyHits || right.completionRate - left.completionRate).slice(0, 2);
   const routineRank = [...memberStats].sort((left, right) => right.repeatedTaskSuccess - left.repeatedTaskSuccess || right.completionRate - left.completionRate).slice(0, 2);
+  const completionRank = [...memberStats]
+    .filter((member) => member.totalTasks > 0)
+    .sort(
+      (left, right) =>
+        right.completionRate - left.completionRate ||
+        right.completedTasks - left.completedTasks ||
+        right.earnedPoints - left.earnedPoints,
+    )
+    .slice(0, 2);
 
   const weekSeries = buildWeekSeries(weekTasks);
   const bestDay = [...weekSeries].sort((left, right) => right.completionRate - left.completionRate || right.completedCount - left.completedCount)[0] ?? null;
@@ -796,6 +1134,7 @@ function buildWeeklyReport(state, weekStartInput = new Date()) {
       mvpRank,
       steadyRank,
       routineRank,
+      completionRank,
       bestDay,
     },
     learningInsights: {
@@ -839,6 +1178,7 @@ function createTabs(mode, childWeeklyReportVisible = false) {
 
 export default function App() {
   const [state, setState] = useState(cloneDefaultState);
+  const [now, setNow] = useState(() => new Date());
   const [mode, setMode] = useState(parseModeFromLocation);
   const [isParentAuthenticated, setIsParentAuthenticated] = useState(readParentAuth);
   const [parentPasswordInput, setParentPasswordInput] = useState('');
@@ -847,6 +1187,7 @@ export default function App() {
   const [taskForm, setTaskForm] = useState(() => createEmptyTaskForm([]));
   const [editingTaskId, setEditingTaskId] = useState('');
   const [rewardForm, setRewardForm] = useState(() => createEmptyRewardForm([]));
+  const [pointAdjustmentForm, setPointAdjustmentForm] = useState(() => createEmptyPointAdjustmentForm([]));
   const [cheerText, setCheerText] = useState('');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState(MODE_CHILD);
@@ -855,33 +1196,66 @@ export default function App() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [syncMessage, setSyncMessage] = useState('');
   const hasLoadedRemoteState = useRef(false);
-  const reportContext = useMemo(() => getWeeklyReportPublishContext(new Date()), [state.tasks.length, state.members.length]);
+  const currentStateRef = useRef(cloneDefaultState());
+  const isSyncingRef = useRef(false);
+  const lastSyncedStateRef = useRef(cloneDefaultState());
+  const lastSavedStateRef = useRef('');
+  const reportContext = useMemo(() => getWeeklyReportPublishContext(now), [now]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    currentStateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     let active = true;
 
     const bootstrap = async () => {
       try {
-        const remoteData = await fetchRemoteState();
+        const remoteState = await fetchRemoteState();
         if (!active) {
           return;
         }
 
-        if (remoteData) {
-          setState(sanitizeImportedState(remoteData));
+        if (hasMeaningfulState(remoteState)) {
+          setState(remoteState);
+          lastSyncedStateRef.current = remoteState;
+          lastSavedStateRef.current = serializeState(remoteState);
         } else {
-          const localState = loadState();
-          const nextState = hasMeaningfulState(localState) ? sanitizeImportedState(localState) : cloneDefaultState();
-          await saveRemoteState(nextState);
-          if (!active) {
-            return;
+          const legacySnapshot = await fetchLegacyRemoteState();
+          if (legacySnapshot.state) {
+            const nextState = sanitizeImportedState(legacySnapshot.state);
+            await replaceRemoteState(nextState);
+            if (!active) {
+              return;
+            }
+            setState(nextState);
+            lastSyncedStateRef.current = nextState;
+            lastSavedStateRef.current = serializeState(nextState);
+          } else {
+            const localState = loadState();
+            const nextState = hasMeaningfulState(localState) ? sanitizeImportedState(localState) : cloneDefaultState();
+            await replaceRemoteState(nextState);
+            if (!active) {
+              return;
+            }
+            setState(nextState);
+            lastSyncedStateRef.current = nextState;
+            lastSavedStateRef.current = serializeState(nextState);
           }
-          setState(nextState);
         }
 
         hasLoadedRemoteState.current = true;
         setSyncMessage('');
       } catch {
+        isSyncingRef.current = false;
         if (!active) {
           return;
         }
@@ -909,19 +1283,80 @@ export default function App() {
       return undefined;
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const serializedState = serializeState(state);
+    localStorage.setItem(STORAGE_KEY, serializedState);
+
+    if (serializedState === lastSavedStateRef.current) {
+      return undefined;
+    }
 
     const timer = setTimeout(async () => {
       try {
-        await saveRemoteState(state);
+        isSyncingRef.current = true;
+        await syncRemoteState(state, lastSyncedStateRef.current);
+        lastSyncedStateRef.current = sanitizeImportedState(state);
+        lastSavedStateRef.current = serializedState;
         setSyncMessage('');
+        isSyncingRef.current = false;
+        return;
+        /* const remoteSnapshot = await fetchRemoteState();
+        if (
+          remoteSnapshot.updatedAt &&
+          lastRemoteUpdatedAtRef.current &&
+          remoteSnapshot.updatedAt !== lastRemoteUpdatedAtRef.current
+        ) {
+          setSyncMessage('다른 기기에서 더 최근 변경이 감지되어 현재 화면 저장을 중단했습니다. 새로고침 후 다시 시도하세요.');
+          return;
+        }
+
+        const updatedAt = await saveRemoteState(state);
+        lastRemoteUpdatedAtRef.current = updatedAt;
+        lastSavedStateRef.current = serializedState;
+        setSyncMessage(''); */
       } catch {
+        isSyncingRef.current = false;
         setSyncMessage('Supabase 저장에 실패했습니다. 네트워크 또는 테이블 설정을 확인하세요.');
       }
     }, 300);
 
     return () => clearTimeout(timer);
   }, [state]);
+
+  useEffect(() => {
+    if (!hasLoadedRemoteState.current) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(async () => {
+      if (isSyncingRef.current) {
+        return;
+      }
+
+      try {
+        const remoteState = await fetchRemoteState();
+        const remoteSerialized = serializeState(remoteState);
+        const localSerialized = serializeState(currentStateRef.current);
+
+        if (remoteSerialized === lastSavedStateRef.current || remoteSerialized === localSerialized) {
+          return;
+        }
+
+        if (localSerialized !== lastSavedStateRef.current) {
+          setSyncMessage('다른 기기 변경이 감지되었습니다. 현재 저장이 끝난 뒤 최신 데이터가 반영됩니다.');
+          return;
+        }
+
+        setState(remoteState);
+        lastSyncedStateRef.current = remoteState;
+        lastSavedStateRef.current = remoteSerialized;
+        setSyncMessage('');
+      } catch {
+        // Keep the current state if background refresh fails.
+      }
+    }, 15000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     writeModeToLocation(mode);
@@ -984,13 +1419,21 @@ export default function App() {
   }, [mode, state.members]);
 
   useEffect(() => {
+    const childIds = new Set(state.members.filter((member) => member.role === MODE_CHILD).map((member) => member.id));
+    setPointAdjustmentForm((current) => ({
+      ...current,
+      memberId: childIds.has(current.memberId) ? current.memberId : (childIds.values().next().value ?? ''),
+    }));
+  }, [state.members]);
+
+  useEffect(() => {
     const allowedTabs = createTabs(mode, reportContext.childVisible);
     if (!allowedTabs.some((item) => item.id === tab)) {
       setTab('dashboard');
     }
   }, [mode, reportContext.childVisible, tab]);
 
-  const balances = useMemo(() => computeMemberBalances(state), [state]);
+  const balances = useMemo(() => computeMemberBalances(state, now), [state, now]);
   const dashboardMembers = useMemo(
     () => (mode === MODE_CHILD ? state.members.filter((member) => member.role === MODE_CHILD) : state.members),
     [mode, state.members],
@@ -1000,21 +1443,27 @@ export default function App() {
     [dashboardMemberId, state.members],
   );
   const dashboardTasks = useMemo(
-    () => (dashboardMemberId ? state.tasks.filter((task) => task.memberId === dashboardMemberId) : []),
+    () => (dashboardMemberId ? state.tasks.filter((task) => task.memberId === dashboardMemberId && !isManualPointAdjustment(task)) : []),
     [dashboardMemberId, state.tasks],
   );
-  const weekSeries = useMemo(() => buildWeekSeries(dashboardTasks), [dashboardTasks]);
-  const history = useMemo(() => buildHistoryGroups(state.tasks, state.members), [state.tasks, state.members]);
-  const parentWeeklyReport = useMemo(() => buildWeeklyReport(state, reportContext.currentWeekStart), [reportContext.currentWeekStart, state]);
-  const childWeeklyReport = useMemo(() => buildWeeklyReport(state, reportContext.publishedWeekStart), [reportContext.publishedWeekStart, state]);
+  const weekSeries = useMemo(() => buildWeekSeries(dashboardTasks, now), [dashboardTasks, now]);
+  const regularTasks = useMemo(() => state.tasks.filter((task) => !isManualPointAdjustment(task)), [state.tasks]);
+  const history = useMemo(() => buildHistoryGroups(regularTasks, state.members, now), [regularTasks, state.members, now]);
+  const restorableHistoryGroups = useMemo(
+    () => buildRestorableHistoryGroups(regularTasks, state.members, now),
+    [regularTasks, state.members, now],
+  );
+  const reportState = useMemo(() => ({ ...state, tasks: regularTasks }), [regularTasks, state]);
+  const parentWeeklyReport = useMemo(() => buildWeeklyReport(reportState, reportContext.currentWeekStart), [reportContext.currentWeekStart, reportState]);
+  const childWeeklyReport = useMemo(() => buildWeeklyReport(reportState, reportContext.publishedWeekStart), [reportContext.publishedWeekStart, reportState]);
   const weeklyReport = mode === MODE_CHILD ? childWeeklyReport : parentWeeklyReport;
   const tabs = useMemo(() => createTabs(mode, reportContext.childVisible), [mode, reportContext.childVisible]);
-  const todayTasks = useMemo(() => dashboardTasks.filter((task) => task.date === todayString()), [dashboardTasks]);
+  const todayTasks = useMemo(() => dashboardTasks.filter((task) => task.date === todayString(now)), [dashboardTasks, now]);
   const editableWeekTasks = useMemo(() => {
-    const allowedDateKeys = new Set(getCurrentWeekDateKeysBeforeToday());
+    const allowedDateKeys = new Set(getCurrentWeekDateKeysBeforeToday(now));
 
     return state.tasks
-      .filter((task) => allowedDateKeys.has(task.date))
+      .filter((task) => allowedDateKeys.has(task.date) && !isManualPointAdjustment(task))
       .sort((left, right) => {
         if (left.date !== right.date) {
           return right.date.localeCompare(left.date);
@@ -1022,10 +1471,16 @@ export default function App() {
 
         return left.title.localeCompare(right.title, 'ko-KR');
       });
-  }, [state.tasks]);
+  }, [state.tasks, now]);
   const childBalances = useMemo(
     () => balances.filter((member) => member.role === MODE_CHILD),
     [balances],
+  );
+  const pointAdjustments = useMemo(
+    () => state.tasks
+      .filter(isManualPointAdjustment)
+      .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt))),
+    [state.tasks],
   );
 
   const latestCheer = state.cheers[0]?.message ?? '오늘 할 일을 하나씩 끝내보자.';
@@ -1033,7 +1488,7 @@ export default function App() {
     const seriesMap = new Map();
     const singles = [];
 
-    state.tasks.forEach((task) => {
+    state.tasks.filter((task) => !isManualPointAdjustment(task)).forEach((task) => {
       if (task.fixed && task.seriesId) {
         const currentSeries = seriesMap.get(task.seriesId) ?? [];
         currentSeries.push(task);
@@ -1109,6 +1564,55 @@ export default function App() {
 
     setMemberName('');
     setMemberRole(MODE_CHILD);
+  };
+
+  const adjustPoints = (direction) => {
+    const amount = Math.trunc(Number(pointAdjustmentForm.points));
+    const member = state.members.find(
+      (item) => item.id === pointAdjustmentForm.memberId && item.role === MODE_CHILD,
+    );
+
+    if (!member || !Number.isFinite(amount) || amount <= 0) {
+      window.alert('아이와 1점 이상의 점수를 입력하세요.');
+      return;
+    }
+
+    const signedPoints = direction === 'subtract' ? -amount : amount;
+    const reason = pointAdjustmentForm.reason.trim() || (signedPoints > 0 ? '누락 점수 지급' : '점수 차감');
+    const timestamp = new Date().toISOString();
+
+    setState((current) => ({
+      ...current,
+      tasks: [
+        ...current.tasks,
+        {
+          id: crypto.randomUUID(),
+          title: reason,
+          memberId: member.id,
+          date: todayString(),
+          points: signedPoints,
+          category: '점수 조정',
+          fixed: false,
+          seriesId: MANUAL_POINT_SERIES_ID,
+          repeatDays: [],
+          completed: true,
+          completedAt: timestamp,
+        },
+      ],
+    }));
+
+    setPointAdjustmentForm((current) => ({ ...current, points: '', reason: '' }));
+  };
+
+  const deletePointAdjustment = (adjustment) => {
+    if (!window.confirm(`'${adjustment.title}' 점수 조정 내역을 취소할까요?`)) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.filter((task) => task.id !== adjustment.id),
+    }));
   };
 
   const deleteMember = (memberId) => {
@@ -1232,7 +1736,7 @@ export default function App() {
       category: task.category || '기타',
       fixed: Boolean(task.fixed),
       selectedWeekdays: Array.isArray(task.repeatDays) ? task.repeatDays : [],
-      repeatWeeks: task.manageType === 'series' ? task.repeatWeeks : 8,
+      repeatWeeks: task.manageType === 'series' ? task.repeatWeeks : '',
     });
   };
 
@@ -1258,46 +1762,36 @@ export default function App() {
 
       if (isSeriesEdit) {
         if (!taskForm.fixed) {
+          const updatedSeriesTasks = buildSeriesAsSingleTasks({
+            matchedSeriesTasks,
+            taskForm,
+            nextBaseTask,
+            createId: () => crypto.randomUUID(),
+          });
+
           return {
             ...current,
             tasks: [
               ...current.tasks.filter((task) => task.seriesId !== editingTaskId),
-              {
-                id: crypto.randomUUID(),
-                ...nextBaseTask,
-                date: taskForm.date,
-                fixed: false,
-                seriesId: '',
-                repeatDays: [],
-                completed: false,
-                completedAt: '',
-              },
+              ...updatedSeriesTasks,
             ],
           };
         }
 
-        const selectedWeekdays = normalizeWeekdays(taskForm.selectedWeekdays, taskForm.date);
-        const previousByDate = new Map(matchedSeriesTasks.map((task) => [task.date, task]));
-        const regeneratedTasks = buildRecurringTaskDates(taskForm.date, selectedWeekdays, taskForm.repeatWeeks).map((date) => {
-          const previousTask = previousByDate.get(date);
-
-          return {
-            id: previousTask?.id ?? crypto.randomUUID(),
-            ...nextBaseTask,
-            date,
-            fixed: true,
-            seriesId: editingTaskId,
-            repeatDays: selectedWeekdays,
-            completed: previousTask?.completed ?? false,
-            completedAt: previousTask?.completedAt ?? '',
-          };
+        const updatedSeriesTasks = buildEditedRecurringTasks({
+          editingTaskId,
+          matchedSeriesTasks,
+          taskForm,
+          nextBaseTask,
+          createId: () => crypto.randomUUID(),
+          preserveBeforeDate: todayString(now),
         });
 
         return {
           ...current,
           tasks: [
             ...current.tasks.filter((task) => task.seriesId !== editingTaskId),
-            ...regeneratedTasks,
+            ...updatedSeriesTasks,
           ],
         };
       }
@@ -1332,6 +1826,7 @@ export default function App() {
             ? {
                 ...task,
                 ...nextBaseTask,
+                ...preserveCompletedTaskScoring(task),
                 date: taskForm.date,
                 fixed: false,
                 seriesId: '',
@@ -1759,6 +2254,7 @@ export default function App() {
                   </div>
                   <div className="row-stats">
                     <span>보유 {member.balance}점</span>
+                    <span>이번 주 획득 {member.weeklyEarnedPoints}점</span>
                     <span>
                       완료 {member.completedTasks}/{member.totalTasks}
                     </span>
@@ -1768,6 +2264,70 @@ export default function App() {
               {balances.length === 0 && <div className="empty-state">먼저 구성원을 추가하세요.</div>}
             </div>
           </section>
+
+          {mode === MODE_PARENT && (
+            <section className="panel">
+              <div className="section-head">
+                <h2>아이 점수 조정</h2>
+                <p>누락된 점수를 직접 지급하거나 잘못 반영된 점수를 차감합니다.</p>
+              </div>
+              <div className="form-grid">
+                <label className="field">
+                  <span>아이</span>
+                  <select
+                    value={pointAdjustmentForm.memberId}
+                    onChange={(event) => setPointAdjustmentForm((current) => ({ ...current, memberId: event.target.value }))}
+                  >
+                    {state.members.filter((member) => member.role === MODE_CHILD).map((member) => (
+                      <option key={member.id} value={member.id}>{member.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>점수</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="예: 20"
+                    value={pointAdjustmentForm.points}
+                    onChange={(event) => setPointAdjustmentForm((current) => ({ ...current, points: event.target.value }))}
+                  />
+                </label>
+                <label className="field full">
+                  <span>사유 (선택)</span>
+                  <input
+                    type="text"
+                    placeholder="예: 9월 18일 독서 점수 누락"
+                    value={pointAdjustmentForm.reason}
+                    onChange={(event) => setPointAdjustmentForm((current) => ({ ...current, reason: event.target.value }))}
+                  />
+                </label>
+                <div className="row-actions full">
+                  <button type="button" className="primary-button" onClick={() => adjustPoints('add')}>점수 주기</button>
+                  <button type="button" className="ghost-button danger" onClick={() => adjustPoints('subtract')}>점수 차감</button>
+                </div>
+              </div>
+
+              <div className="section-head compact-head">
+                <h3>최근 조정 내역</h3>
+              </div>
+              <div className="task-list">
+                {pointAdjustments.slice(0, 10).map((adjustment) => (
+                  <div key={adjustment.id} className="task-row">
+                    <div className="task-meta">
+                      <strong>{adjustment.title}</strong>
+                      <small>
+                        {formatDate(adjustment.date)} · {getMemberName(state.members, adjustment.memberId)} · {adjustment.points > 0 ? '+' : ''}{adjustment.points}점
+                      </small>
+                    </div>
+                    <button type="button" className="ghost-button danger" onClick={() => deletePointAdjustment(adjustment)}>조정 취소</button>
+                  </div>
+                ))}
+                {pointAdjustments.length === 0 && <div className="empty-state">점수 조정 내역이 없습니다.</div>}
+              </div>
+            </section>
+          )}
 
           {mode === MODE_PARENT && (
             <section className="panel">
@@ -1916,7 +2476,12 @@ export default function App() {
                         min="1"
                         max="52"
                         value={taskForm.repeatWeeks}
-                        onChange={(e) => setTaskForm((current) => ({ ...current, repeatWeeks: Number(e.target.value || 1) }))}
+                        onChange={(e) =>
+                          setTaskForm((current) => ({
+                            ...current,
+                            repeatWeeks: e.target.value === '' ? '' : Number(e.target.value),
+                          }))
+                        }
                         placeholder="예: 8"
                       />
                       <small className="field-hint">시작 날짜부터 몇 주치 과제를 한 번에 만들지 정합니다.</small>
@@ -2059,6 +2624,50 @@ export default function App() {
         <main className="content-grid">
           <section className="panel">
             <div className="section-head">
+              <h2>점수 복구</h2>
+              <p>이전 날짜 과제의 완료 여부를 부모 모드에서 직접 복구합니다. 문제가 생긴 경우 여기서 원래 점수 상태로 되돌릴 수 있습니다.</p>
+            </div>
+            <div className="mini-list">
+              {restorableHistoryGroups.length === 0 ? (
+                <div className="empty-state">복구할 이전 과제가 없습니다.</div>
+              ) : (
+                restorableHistoryGroups.map((group) => (
+                  <div key={group.date} className="restore-group">
+                    <div className="table-row">
+                      <strong>{group.label}</strong>
+                      <div className="row-stats">
+                        <span>과제 {group.summary.total}개</span>
+                        <span>완료 {group.summary.completed}개</span>
+                        <span>획득 {group.summary.points}점</span>
+                      </div>
+                    </div>
+                    <div className="task-list">
+                      {group.tasks.map((task) => (
+                        <div key={task.id} className={task.completed ? 'task-row done' : 'task-row'}>
+                          <label className="task-check">
+                            <input
+                              type="checkbox"
+                              checked={task.completed}
+                              onChange={(e) => setTaskCompletion(task.id, e.target.checked)}
+                            />
+                            <span>
+                              <strong>{task.title}</strong>
+                              <small>
+                                {task.memberName} · {task.category} · {task.points}점
+                              </small>
+                              {task.completedAt ? <small>완료 시각 {formatDateTime(task.completedAt)}</small> : null}
+                            </span>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+          <section className="panel">
+            <div className="section-head">
               <h2>주간 조회</h2>
               <p>{history.week.label} 이후에 등록된 기록입니다.</p>
             </div>
@@ -2168,8 +2777,7 @@ export default function App() {
             <div className="section-head">
               <h2>이번 주 시상식</h2>
               <p>재미 요소를 섞은 자동 요약입니다.</p>
-            </div>
-            <div className="mini-list">
+            </div>            <div className="mini-list">
               <div className="message-row">
                 <strong>MVP</strong>
                 <small>
@@ -2179,7 +2787,7 @@ export default function App() {
                 </small>
               </div>
               <div className="message-row">
-                <strong>성실왕</strong>
+                <strong>꾸준상</strong>
                 <small>
                   {weeklyReport.awards.steadyRank[0]
                     ? `1위 ${weeklyReport.awards.steadyRank[0].name} · ${weeklyReport.awards.steadyRank[0].dailyHits}일 · 완료율 ${weeklyReport.awards.steadyRank[0].completionRate}% / 2위 ${weeklyReport.awards.steadyRank[1] ? `${weeklyReport.awards.steadyRank[1].name} · ${weeklyReport.awards.steadyRank[1].dailyHits}일 · 완료율 ${weeklyReport.awards.steadyRank[1].completionRate}%` : '-'}`
@@ -2187,10 +2795,18 @@ export default function App() {
                 </small>
               </div>
               <div className="message-row">
-                <strong>루틴왕</strong>
+                <strong>루틴상</strong>
                 <small>
                   {weeklyReport.awards.routineRank[0]
                     ? `1위 ${weeklyReport.awards.routineRank[0].name} · ${weeklyReport.awards.routineRank[0].repeatedTaskSuccess}회 · 완료율 ${weeklyReport.awards.routineRank[0].completionRate}% / 2위 ${weeklyReport.awards.routineRank[1] ? `${weeklyReport.awards.routineRank[1].name} · ${weeklyReport.awards.routineRank[1].repeatedTaskSuccess}회 · 완료율 ${weeklyReport.awards.routineRank[1].completionRate}%` : '-'}`
+                    : '데이터 없음'}
+                </small>
+              </div>
+              <div className="message-row">
+                <strong>완성도상</strong>
+                <small>
+                  {weeklyReport.awards.completionRank[0]
+                    ? `1위 ${weeklyReport.awards.completionRank[0].name} · 완료율 ${weeklyReport.awards.completionRank[0].completionRate}% · 완료 ${weeklyReport.awards.completionRank[0].completedTasks}개 / 2위 ${weeklyReport.awards.completionRank[1] ? `${weeklyReport.awards.completionRank[1].name} · 완료율 ${weeklyReport.awards.completionRank[1].completionRate}% · 완료 ${weeklyReport.awards.completionRank[1].completedTasks}개` : '-'}`
                     : '데이터 없음'}
                 </small>
               </div>
